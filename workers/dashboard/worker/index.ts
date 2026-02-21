@@ -23,6 +23,8 @@ interface Env {
   AUTH_PROVIDER?: string;
   /** Cloudflare Access team domain (e.g. "your-team.cloudflareaccess.com") — used for login redirect */
   CF_ACCESS_TEAM_DOMAIN?: string;
+  /** When "true", the dashboard is read-only (demo mode). Write endpoints return 403. */
+  DEMO_MODE?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +509,18 @@ export default {
       }
 
       // -----------------------------------------------------------------------
+      // Demo mode guard — block all write operations
+      // -----------------------------------------------------------------------
+      const isDemoMode = env.DEMO_MODE === "true";
+      if (isDemoMode && (method === "POST" || method === "PUT" || method === "DELETE")) {
+        // Allow chat (POST /api/agents/:id/chat) in demo mode -- it's read-like
+        const isChatRequest = /^\/api\/agents\/[^/]+\/chat$/.test(path);
+        if (!isChatRequest) {
+          return errorJson("This is a read-only demo instance", 403);
+        }
+      }
+
+      // -----------------------------------------------------------------------
       // GET /api/me
       // -----------------------------------------------------------------------
       if (method === "GET" && path === "/api/me") {
@@ -780,9 +794,10 @@ function handleLogout(): Response {
 // ---------------------------------------------------------------------------
 async function handleSessionCheck(request: Request, env: Env): Promise<Response> {
   const provider = env.AUTH_PROVIDER || "none";
+  const demoMode = env.DEMO_MODE === "true";
 
   if (provider === "none") {
-    return json({ authenticated: true, provider: "none" });
+    return json({ authenticated: true, provider: "none", demoMode });
   }
 
   if (provider === "cloudflare-access") {
@@ -792,6 +807,7 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
       provider: "cloudflare-access",
       email: email || null,
       teamDomain: env.CF_ACCESS_TEAM_DOMAIN || null,
+      demoMode,
     });
   }
 
@@ -801,13 +817,13 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
     if (token) {
       const email = await verifySessionToken(token, env.ADMIN_PASSWORD);
       if (email) {
-        return json({ authenticated: true, provider: "password", email });
+        return json({ authenticated: true, provider: "password", email, demoMode });
       }
     }
-    return json({ authenticated: false, provider: "password" });
+    return json({ authenticated: false, provider: "password", demoMode });
   }
 
-  return json({ authenticated: true, provider: "none" });
+  return json({ authenticated: true, provider: "none", demoMode });
 }
 
 // ---------------------------------------------------------------------------

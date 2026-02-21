@@ -1,0 +1,19 @@
+{
+  "name": "openchief-demo-engine",
+  // "account_id": "REPLACE_WITH_YOUR_ACCOUNT_ID",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "queues": {
+    "producers": [
+      {
+        "queue": "openchief-events",
+        "binding": "EVENTS_QUEUE"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  }
+  // No secrets needed -- the demo engine generates synthetic events only.
+  // To run: deploy alongside the other workers, or use `wrangler dev` locally.
+}

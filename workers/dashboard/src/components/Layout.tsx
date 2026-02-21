@@ -4,6 +4,8 @@ import type { AgentDefinition } from "@openchief/shared";
 import { api, type ConnectionStatus, type CurrentUser } from "@/lib/api";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ChatSidebar } from "@/components/ChatSidebar";
+import { DemoBanner } from "@/components/DemoBanner";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_KEY = "openchief-sidebar-collapsed";
@@ -30,6 +32,8 @@ export function Layout() {
       // storage unavailable
     }
   }, [collapsed]);
+
+  const { demoMode } = useAuth();
 
   // ---------------------------------------------------------------------------
   // Data fetching
@@ -97,6 +101,7 @@ export function Layout() {
         className="flex flex-1 flex-col overflow-hidden transition-[margin-left] duration-200 ease-in-out"
         style={{ marginLeft: sidebarWidth }}
       >
+        {demoMode && <DemoBanner />}
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-6xl p-6">
             <Outlet />

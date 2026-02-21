@@ -167,6 +167,13 @@ const WORKERS: WorkerSpec[] = [
     needsAccountVar: false,
     connectorName: "rippling",
   },
+  // Demo engine -- only included in generate-config, deployed separately
+  {
+    path: "workers/demo-engine",
+    needsD1: false,
+    kvBindings: [],
+    needsAccountVar: false,
+  },
 ];
 
 async function main() {

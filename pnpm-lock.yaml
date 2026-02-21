@@ -339,6 +339,22 @@ importers:
         specifier: ^4.0.0
         version: 4.67.0(@cloudflare/workers-types@4.20260219.0)
 
+  workers/demo-engine:
+    dependencies:
+      '@openchief/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20250214.0
+        version: 4.20260219.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      wrangler:
+        specifier: ^4.0.0
+        version: 4.67.0(@cloudflare/workers-types@4.20260219.0)
+
   workers/router:
     dependencies:
       '@openchief/shared':

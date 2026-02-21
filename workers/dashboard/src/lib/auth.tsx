@@ -22,6 +22,8 @@ interface AuthState {
   provider: AuthProvider;
   /** Cloudflare Access team domain (for login redirect) */
   teamDomain: string | null;
+  /** Is this a read-only demo instance? */
+  demoMode: boolean;
 }
 
 interface AuthContextType extends AuthState {
@@ -45,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authenticated: false,
     provider: "none",
     teamDomain: null,
+    demoMode: false,
   });
 
   // Check session on mount
@@ -56,12 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           authenticated: boolean;
           provider: string;
           teamDomain?: string;
+          demoMode?: boolean;
         }) => {
           setState({
             checked: true,
             authenticated: data.authenticated,
             provider: data.provider as AuthProvider,
             teamDomain: data.teamDomain || null,
+            demoMode: data.demoMode || false,
           });
         },
       )
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           authenticated: true,
           provider: "none",
           teamDomain: null,
+          demoMode: false,
         });
       });
   }, []);
