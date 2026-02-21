@@ -36,6 +36,14 @@ Data Sources          Connectors         Event Router        Agent Runtime      
 
 ### Setup
 
+**One-liner** (checks for prerequisites, clones, installs):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/serpin-taxt/openchief/main/install.sh | bash
+```
+
+**Or manually:**
+
 ```bash
 git clone https://github.com/serpin-taxt/openchief.git
 cd openchief
