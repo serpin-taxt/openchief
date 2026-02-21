@@ -107,7 +107,10 @@ You must output ONLY valid JSON matching this exact shape:
 5. Use the team member list to attribute work to real names.
 6. Compare against previous reports when available to identify trends.
 7. If there are few events, say so honestly rather than padding the report.
-8. Health signal: green = on track, yellow = some concerns, red = urgent issues.`;
+8. Health signal: green = on track, yellow = some concerns, red = urgent issues.
+
+═══ OUTPUT CONSTRAINTS ═══
+CRITICAL: Keep your TOTAL JSON output under 4000 tokens. Each section body should be 2-4 concise paragraphs max. Prioritize the most important insights rather than covering everything. Use bullet points sparingly. Do NOT repeat the same information across sections.`;
 }
 
 function buildUserPrompt(

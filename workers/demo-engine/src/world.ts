@@ -117,6 +117,65 @@ export const CUSTOMERS = [
   { name: "FoodTruck Festival Org", plan: "events", contact: "events@foodtruckfest.org" },
 ];
 
+// -- Twitter / X ---------------------------------------------------------------
+
+export const TWITTER_HANDLE = "@serpinsburgers";
+
+export const TWEETS = [
+  "NEW: The Spicy Jalapeño Smash is back for a limited time. 🌶️ Available at all 12 locations starting today.",
+  "Behind the scenes at our downtown kitchen — fresh patties, hand-cut fries, and a whole lot of love. 🍔",
+  "We just hit 50,000 loyalty members! Thank you Shack Nation for being the best community in fast casual. 🎉",
+  "Weekend vibes at the Lakewood Mall location. Drive-thru wait times under 4 minutes today. ⚡",
+  "Our mobile app just got a major update — order tracking, Apple Pay, and faster checkout. Link in bio.",
+  "Shoutout to our kitchen crew at Location #7 — fastest average ticket time in the chain this month. 💪",
+  "Thinking about franchising? We're expanding to 5 new markets in 2026. DM us for info.",
+  "Fun fact: we go through 2,400 lbs of ground beef per week across all locations. Fresh, never frozen. 🥩",
+  "Free delivery this weekend on orders $25+ through the app. Use code SHACKFREE at checkout.",
+  "Congrats to our team for winning Best Burger in the city for the 3rd year running! 🏆",
+];
+
+export const TWEET_MENTIONS = [
+  { author: "foodie_mike", text: "@serpinsburgers the new bacon cheese fries are insane. Best fast casual side in the game." },
+  { author: "local_eats_blog", text: "Just reviewed @serpinsburgers new seasonal menu. The jalapeño smash burger is a must-try. Full review on our blog." },
+  { author: "delivery_driver_dan", text: "@serpinsburgers your app's driver routing is so much better now. Thanks for the update!" },
+  { author: "campus_dining", text: "@serpinsburgers loved the catering for our campus event! 200 burgers and everyone was happy." },
+  { author: "sarah_eats_local", text: "The @serpinsburgers loyalty program is actually worth it. Just redeemed free fries + a shake for 300 pts." },
+  { author: "burger_reviewer", text: "@serpinsburgers vs the competition isn't even close. Quality and speed every single time." },
+  { author: "tech_food_writer", text: "Interesting: @serpinsburgers is building their own kitchen display system and delivery platform in-house. Unusual for a 12-location chain." },
+];
+
+// -- Google Calendar meetings ---------------------------------------------------
+
+export const MEETINGS = [
+  { title: "Daily Standup", organizer: "Maria Gonzalez", attendees: 6, duration: 15, recurring: true },
+  { title: "Sprint Planning", organizer: "Lily Tran", attendees: 8, duration: 60, recurring: true },
+  { title: "Design Review — Catering Portal", organizer: "Marco DiStefano", attendees: 5, duration: 45, recurring: false },
+  { title: "1:1 Derek / Maria", organizer: "Derek Serpin", attendees: 2, duration: 30, recurring: true },
+  { title: "Franchise Partner Sync", organizer: "Derek Serpin", attendees: 4, duration: 30, recurring: true },
+  { title: "Security Review — Payment Gateway", organizer: "Nadia Kim", attendees: 4, duration: 60, recurring: false },
+  { title: "Kitchen Display System Demo", organizer: "Jake Thompson", attendees: 6, duration: 30, recurring: false },
+  { title: "Marketing Sync", organizer: "Becca Hartwell", attendees: 3, duration: 30, recurring: true },
+  { title: "Support Ticket Triage", organizer: "Jessie Reeves", attendees: 3, duration: 30, recurring: true },
+  { title: "All-Hands", organizer: "Derek Serpin", attendees: 15, duration: 45, recurring: true },
+  { title: "Mobile App Release Review", organizer: "Aisha Patel", attendees: 5, duration: 30, recurring: false },
+  { title: "1:1 Maria / Jake", organizer: "Maria Gonzalez", attendees: 2, duration: 30, recurring: true },
+  { title: "Menu Planning — Q2 Seasonal Items", organizer: "Lily Tran", attendees: 6, duration: 60, recurring: false },
+  { title: "Investor Update Prep", organizer: "Charlie Watts", attendees: 3, duration: 45, recurring: false },
+  { title: "Data Deep Dive — Order Funnel", organizer: "Omar Farouk", attendees: 4, duration: 45, recurring: false },
+];
+
+// -- QuickBooks finance data ----------------------------------------------------
+
+export const QUICKBOOKS_CUSTOMERS = [
+  "Walk-in Orders", "Mobile App Orders", "Delivery Platform", "Catering - Corporate",
+  "Catering - Events", "Franchise Royalties", "Lakewood Mall Location", "Northside Franchise",
+];
+
+export const QUICKBOOKS_VENDORS = [
+  "Premium Beef Co.", "Baker's Best Buns", "FreshCut Produce", "POS Systems Inc.",
+  "CloudKitchen Equipment", "Paper & Packaging Supply", "Delivery Fleet Lease",
+];
+
 // -- Helpers -------------------------------------------------------------------
 
 /** Pick a random element from an array. */

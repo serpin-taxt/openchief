@@ -599,7 +599,22 @@ export class AgentDurableObject extends DurableObject<Env> {
       payload: string;
     }>
   > {
-    if (subscriptions.length === 0) return [];
+    // Empty subscriptions = subscribe to ALL events (e.g. CEO agent)
+    if (subscriptions.length === 0) {
+      const sql = `SELECT timestamp, source, event_type, summary, payload
+        FROM events
+        WHERE timestamp >= ? AND timestamp <= ?
+        ORDER BY timestamp ASC
+        LIMIT ?`;
+      const result = await this.env.DB.prepare(sql).bind(cutoff, nowStr, limit).all();
+      return result.results as Array<{
+        timestamp: string;
+        source: string;
+        event_type: string;
+        summary: string;
+        payload: string;
+      }>;
+    }
 
     const params: unknown[] = [cutoff, nowStr];
     const subClauses: string[] = [];

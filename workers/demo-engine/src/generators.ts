@@ -9,6 +9,8 @@ import {
   TEAM, ORG, REPO, SLACK_WORKSPACE, DISCORD_SERVER, JIRA_PROJECT,
   SLACK_CHANNELS, DISCORD_CHANNELS, PR_TITLES, JIRA_TICKETS,
   COMMUNITY_MEMBERS, CUSTOMERS,
+  TWITTER_HANDLE, TWEETS, TWEET_MENTIONS,
+  MEETINGS, QUICKBOOKS_CUSTOMERS, QUICKBOOKS_VENDORS,
   pick, pickN, randInt, randFloat, recentTimestamp,
 } from "./world";
 
@@ -491,6 +493,227 @@ export function generateGoogleAnalyticsEvents(): OpenChiefEvent[] {
   }];
 }
 
+// -- Twitter / X events ---------------------------------------------------------
+
+export function generateTwitterEvents(): OpenChiefEvent[] {
+  const events: OpenChiefEvent[] = [];
+
+  // 0-1 original tweets per cycle
+  if (Math.random() > 0.5) {
+    const text = pick(TWEETS);
+    const ts = recentTimestamp(1, 25);
+    const tweetId = String(randInt(1800000000000, 1899999999999));
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "twitter",
+      eventType: "tweet.posted",
+      scope: { org: ORG, actor: TWITTER_HANDLE },
+      payload: {
+        tweet_id: tweetId,
+        author_username: "serpinsburgers",
+        text,
+        likes: randInt(15, 280),
+        retweets: randInt(3, 45),
+        replies: randInt(1, 30),
+        impressions: randInt(2000, 25000),
+        url: `https://x.com/serpinsburgers/status/${tweetId}`,
+      },
+      summary: `${TWITTER_HANDLE} tweeted: ${text}`,
+    });
+  }
+
+  // 1-3 mentions per cycle
+  const mentionCount = randInt(1, 3);
+  for (let i = 0; i < mentionCount; i++) {
+    const mention = pick(TWEET_MENTIONS);
+    const ts = recentTimestamp(1, 28);
+    const tweetId = String(randInt(1800000000000, 1899999999999));
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "twitter",
+      eventType: "mention.received",
+      scope: { org: ORG, actor: `@${mention.author}` },
+      payload: {
+        tweet_id: tweetId,
+        author_username: mention.author,
+        text: mention.text,
+        likes: randInt(2, 80),
+        retweets: randInt(0, 15),
+        url: `https://x.com/${mention.author}/status/${tweetId}`,
+      },
+      summary: `@${mention.author} mentioned ${TWITTER_HANDLE}: ${mention.text}`,
+    });
+  }
+
+  // Occasional engagement snapshot
+  if (Math.random() > 0.6) {
+    const ts = recentTimestamp(1, 15);
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "twitter",
+      eventType: "account.engagement_snapshot",
+      scope: { org: ORG, actor: TWITTER_HANDLE },
+      payload: {
+        followers: randInt(12000, 15000),
+        following: randInt(340, 380),
+        total_likes_24h: randInt(150, 800),
+        total_retweets_24h: randInt(20, 120),
+        total_impressions_24h: randInt(15000, 85000),
+        top_tweet_impressions: randInt(5000, 25000),
+      },
+      summary: `${TWITTER_HANDLE} engagement: ${randInt(150, 800)} likes, ${randInt(20, 120)} retweets, ${randInt(15000, 85000)} impressions in last 24h`,
+    });
+  }
+
+  return events;
+}
+
+// -- Google Calendar events -----------------------------------------------------
+
+export function generateGoogleCalendarEvents(): OpenChiefEvent[] {
+  const events: OpenChiefEvent[] = [];
+
+  // 2-5 meetings per cycle
+  const meetingCount = randInt(2, 5);
+  const selectedMeetings = pickN(MEETINGS, meetingCount);
+
+  for (const meeting of selectedMeetings) {
+    const isUpcoming = Math.random() > 0.4;
+    const ts = recentTimestamp(1, 25);
+
+    // Generate meeting start time (within business hours today)
+    const startHour = randInt(9, 17);
+    const startMin = pick([0, 15, 30, 45]);
+    const today = new Date();
+    today.setHours(startHour, startMin, 0, 0);
+    const startTime = today.toISOString();
+    const endTime = new Date(today.getTime() + meeting.duration * 60 * 1000).toISOString();
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "googlecalendar",
+      eventType: isUpcoming ? "meeting.upcoming" : "meeting.completed",
+      scope: { org: ORG, actor: meeting.organizer },
+      payload: {
+        title: meeting.title,
+        organizer: meeting.organizer,
+        attendee_count: meeting.attendees,
+        start_time: startTime,
+        end_time: endTime,
+        duration_minutes: meeting.duration,
+        recurring: meeting.recurring,
+        status: isUpcoming ? "confirmed" : "completed",
+      },
+      summary: `${isUpcoming ? "Upcoming" : "Completed"}: "${meeting.title}" organized by ${meeting.organizer} (${meeting.attendees} attendees, ${meeting.duration}min)`,
+    });
+  }
+
+  return events;
+}
+
+// -- QuickBooks events ----------------------------------------------------------
+
+export function generateQuickBooksEvents(): OpenChiefEvent[] {
+  const events: OpenChiefEvent[] = [];
+
+  // 1-3 invoices per cycle
+  const invoiceCount = randInt(1, 3);
+  for (let i = 0; i < invoiceCount; i++) {
+    const customer = pick(QUICKBOOKS_CUSTOMERS);
+    const amount = Math.round(randFloat(250, 8500) * 100) / 100;
+    const isPaid = Math.random() > 0.5;
+    const isNew = !isPaid && Math.random() > 0.5;
+    const invoiceNum = randInt(1001, 1500);
+    const ts = recentTimestamp(1, 28);
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "quickbooks",
+      eventType: isNew ? "invoice.created" : isPaid ? "invoice.paid" : "invoice.updated",
+      scope: { org: ORG, actor: customer },
+      payload: {
+        invoice_number: `INV-${invoiceNum}`,
+        customer_name: customer,
+        amount,
+        balance: isPaid ? 0 : amount,
+        due_date: new Date(Date.now() + randInt(7, 30) * 86400000).toISOString().split("T")[0],
+        status: isPaid ? "Paid" : isNew ? "Open" : "Overdue",
+        line_items: randInt(2, 8),
+      },
+      summary: `Invoice INV-${invoiceNum} for ${customer}: $${amount.toFixed(2)} — ${isPaid ? "Paid" : isNew ? "Created" : "Updated"}`,
+    });
+  }
+
+  // 0-2 payments received
+  const paymentCount = randInt(0, 2);
+  for (let i = 0; i < paymentCount; i++) {
+    const customer = pick(QUICKBOOKS_CUSTOMERS);
+    const amount = Math.round(randFloat(500, 12000) * 100) / 100;
+    const ts = recentTimestamp(1, 25);
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "quickbooks",
+      eventType: "payment.received",
+      scope: { org: ORG, actor: customer },
+      payload: {
+        customer_name: customer,
+        amount,
+        payment_method: pick(["Credit Card", "ACH Transfer", "Check", "Wire Transfer"]),
+        reference: `PAY-${randInt(5001, 5999)}`,
+      },
+      summary: `Payment received from ${customer}: $${amount.toFixed(2)}`,
+    });
+  }
+
+  // Occasional P&L report
+  if (Math.random() > 0.7) {
+    const ts = recentTimestamp(1, 15);
+    const revenue = Math.round(randFloat(180000, 320000) * 100) / 100;
+    const cogs = Math.round(revenue * randFloat(0.28, 0.35) * 100) / 100;
+    const opex = Math.round(revenue * randFloat(0.35, 0.45) * 100) / 100;
+    const netIncome = Math.round((revenue - cogs - opex) * 100) / 100;
+
+    events.push({
+      id: generateULID(),
+      timestamp: ts,
+      ingestedAt: now(),
+      source: "quickbooks",
+      eventType: "report.profit_and_loss",
+      scope: { org: ORG },
+      payload: {
+        period: "current_month",
+        total_revenue: revenue,
+        cost_of_goods_sold: cogs,
+        gross_profit: Math.round((revenue - cogs) * 100) / 100,
+        operating_expenses: opex,
+        net_income: netIncome,
+        margin_pct: Math.round((netIncome / revenue) * 10000) / 100,
+        top_revenue_categories: ["Dine-In Sales", "Mobile Orders", "Delivery", "Catering", "Franchise Fees"],
+        top_expense_categories: ["Food & Ingredients", "Labor", "Rent & Utilities", "Equipment Lease", "Marketing"],
+      },
+      summary: `P&L: Revenue $${(revenue / 1000).toFixed(0)}K, COGS $${(cogs / 1000).toFixed(0)}K, Net Income $${(netIncome / 1000).toFixed(0)}K (${((netIncome / revenue) * 100).toFixed(1)}% margin)`,
+    });
+  }
+
+  return events;
+}
+
 // -- Combined generator ---------------------------------------------------------
 
 export function generateEventBatch(): OpenChiefEvent[] {
@@ -503,5 +726,8 @@ export function generateEventBatch(): OpenChiefEvent[] {
     ...generateIntercomEvents(),
     ...generateAmplitudeEvents(),
     ...generateGoogleAnalyticsEvents(),
+    ...generateTwitterEvents(),
+    ...generateGoogleCalendarEvents(),
+    ...generateQuickBooksEvents(),
   ];
 }

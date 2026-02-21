@@ -13,13 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export function Login() {
-  const { authenticated, provider, login } = useAuth();
+  const { authenticated, provider, isAdmin, login } = useAuth();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
 
-  // If already authenticated (or not in password mode), redirect to home
-  if (authenticated && provider === "password") {
+  // Redirect to home when authenticated as password user or after admin login
+  if ((authenticated && provider === "password") || loginSuccess) {
     return <Navigate to="/" replace />;
   }
 
@@ -29,11 +30,12 @@ export function Login() {
     setLoading(true);
     const result = await login(password);
     setLoading(false);
-    if (!result.ok) {
+    if (result.ok) {
+      setLoginSuccess(true);
+    } else {
       setError(result.error || "Invalid password");
       setPassword("");
     }
-    // If login succeeded, the auth state change will trigger redirect above
   }
 
   return (

@@ -24,6 +24,8 @@ interface AuthState {
   teamDomain: string | null;
   /** Is this a read-only demo instance? */
   demoMode: boolean;
+  /** Is the user logged in as admin (demo mode)? */
+  isAdmin: boolean;
 }
 
 interface AuthContextType extends AuthState {
@@ -48,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     provider: "none",
     teamDomain: null,
     demoMode: false,
+    isAdmin: false,
   });
 
   // Check session on mount
@@ -60,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           provider: string;
           teamDomain?: string;
           demoMode?: boolean;
+          isAdmin?: boolean;
         }) => {
           setState({
             checked: true,
@@ -67,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             provider: data.provider as AuthProvider,
             teamDomain: data.teamDomain || null,
             demoMode: data.demoMode || false,
+            isAdmin: data.isAdmin || false,
           });
         },
       )
@@ -78,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           provider: "none",
           teamDomain: null,
           demoMode: false,
+          isAdmin: false,
         });
       });
   }, []);
@@ -90,7 +96,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
-        setState((prev) => ({ ...prev, authenticated: true }));
+        // Re-fetch session to pick up isAdmin and updated provider state
+        const sessionRes = await fetch("/api/auth/session");
+        const session = (await sessionRes.json().catch(() => ({}))) as {
+          authenticated?: boolean;
+          provider?: string;
+          demoMode?: boolean;
+          isAdmin?: boolean;
+        };
+        setState((prev) => ({
+          ...prev,
+          authenticated: true,
+          isAdmin: session.isAdmin || false,
+        }));
         return { ok: true };
       }
       const data = (await res.json().catch(() => ({}))) as {
