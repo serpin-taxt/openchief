@@ -1,0 +1,48 @@
+{
+  "name": "openchief-runtime",
+  // account_id: generated from openchief.config.ts
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AGENT_DO",
+        "class_name": "AgentDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AgentDurableObject"]
+    }
+  ],
+  // d1_databases, kv_namespaces: generated from openchief.config.ts
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "openchief-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  "vars": {
+    "ORG_NAME": "My Company",
+    "ORG_CONTEXT": "",
+    "DEFAULT_MODEL": "claude-sonnet-4-6",
+    "REPORT_TIMEZONE": "America/Chicago",
+    "GITHUB_REPO": ""
+  },
+  // Daily report triggers — adjust times in openchief.config.ts
+  "triggers": {
+    "crons": ["55 13 * * 1-5"]
+  }
+  // Secrets (via `wrangler secret put`):
+  //   ANTHROPIC_API_KEY
+}

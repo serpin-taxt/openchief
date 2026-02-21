@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.turbo/
+
+# Environment & secrets
+.env
+.env.*
+.dev.vars
+
+# Wrangler
+.wrangler/
+
+# Config (generated from openchief.config.ts)
+openchief.config.ts
+!openchief.example.config.ts
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

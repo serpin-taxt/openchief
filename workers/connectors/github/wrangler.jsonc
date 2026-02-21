@@ -1,0 +1,30 @@
+{
+  "name": "openchief-connector-github",
+  // "account_id": "REPLACE_WITH_YOUR_ACCOUNT_ID",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "queues": {
+    "producers": [
+      {
+        "queue": "openchief-events",
+        "binding": "EVENTS_QUEUE"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "POLL_CURSOR",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+  // Secrets (set via `wrangler secret put <NAME>`):
+  //   GITHUB_WEBHOOK_SECRET  — webhook signature verification
+  //   GITHUB_APP_ID          — GitHub App ID
+  //   GITHUB_APP_PRIVATE_KEY — GitHub App private key (PKCS#8 PEM)
+  //   GITHUB_INSTALLATION_ID — GitHub App installation ID
+  //   GITHUB_REPOS           — comma-separated repo list, e.g. "org/repo1,org/repo2"
+  //   ADMIN_SECRET           — bearer token for /poll admin endpoint
+}

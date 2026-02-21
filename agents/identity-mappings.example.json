@@ -1,0 +1,32 @@
+[
+  {
+    "github_username": "your-github-user",
+    "slack_user_id": "U0123456789",
+    "email": "alice@example.com",
+    "real_name": "Alice Johnson",
+    "display_name": "Alice",
+    "figma_handle": "Alice Johnson",
+    "discord_handle": "alice",
+    "team": "engineering",
+    "role": "Staff Engineer",
+    "is_bot": false
+  },
+  {
+    "github_username": "another-dev",
+    "email": "bob@example.com",
+    "real_name": "Bob Smith",
+    "display_name": "Bob",
+    "team": "engineering",
+    "is_bot": false
+  },
+  {
+    "github_username": "dependabot[bot]",
+    "real_name": "Dependabot",
+    "is_bot": true
+  },
+  {
+    "github_username": "github-actions[bot]",
+    "real_name": "GitHub Actions",
+    "is_bot": true
+  }
+]

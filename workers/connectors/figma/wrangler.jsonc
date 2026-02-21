@@ -1,0 +1,35 @@
+{
+  "name": "openchief-connector-figma",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "queues": {
+    "producers": [
+      {
+        "queue": "openchief-events",
+        "binding": "EVENTS_QUEUE"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "openchief-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+  // Secrets (set via `wrangler secret put`):
+  //   FIGMA_TOKEN
+  //   FIGMA_PASSCODE
+  //   FIGMA_CLIENT_ID
+  //   FIGMA_CLIENT_SECRET
+  //   ADMIN_SECRET
+}

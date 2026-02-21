@@ -1,0 +1,27 @@
+{
+  "name": "openchief-connector-quickbooks",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "workers_dev": true,
+  "queues": {
+    "producers": [
+      {
+        "queue": "openchief-events",
+        "binding": "EVENTS_QUEUE"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  // Secrets set via `wrangler secret put`:
+  //   QB_CLIENT_ID
+  //   QB_CLIENT_SECRET
+  //   ADMIN_SECRET
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+}

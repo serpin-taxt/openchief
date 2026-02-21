@@ -1,0 +1,37 @@
+{
+  "name": "openchief-connector-twitter",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-02-01",
+  "queues": {
+    "producers": [
+      {
+        "queue": "openchief-events",
+        "binding": "EVENTS_QUEUE"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "openchief-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */2 * * *"]
+  }
+  // Secrets (set via `wrangler secret put`):
+  //   X_BEARER_TOKEN
+  //   X_OAUTH_CLIENT_ID
+  //   X_OAUTH_CLIENT_SECRET
+  //   ADMIN_SECRET
+  // Env vars (set in dashboard or via vars):
+  //   X_MONITORED_ACCOUNTS  — comma-separated Twitter usernames
+  //   X_SEARCH_QUERIES      — pipe-delimited search queries
+}

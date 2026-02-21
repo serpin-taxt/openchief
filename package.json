@@ -1,0 +1,25 @@
+{
+  "name": "openchief",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp"]
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "typecheck": "turbo typecheck",
+    "seed": "tsx scripts/seed-agents.ts",
+    "setup": "tsx scripts/setup.ts",
+    "generate-config": "tsx scripts/generate-config.ts",
+    "deploy": "tsx scripts/deploy.ts",
+    "teardown": "tsx scripts/teardown.ts",
+    "sync-test": "rsync -av --delete --exclude node_modules --exclude .wrangler --exclude openchief.config.ts ./ ~/dev/openchief-test/"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "wrangler": "^4.0.0"
+  }
+}
