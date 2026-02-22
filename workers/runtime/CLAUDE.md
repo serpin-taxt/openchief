@@ -32,6 +32,7 @@ src/
 | POST | `/trigger/:agentId/:reportType` | Manually trigger a report. Optional `?asOf=YYYY-MM-DD` for backfill |
 | POST | `/chat/:agentId` | SSE streaming chat. Body: `{ message, userEmail?, userName? }` |
 | GET | `/chat/:agentId/history` | Chat history. Query: `?email=USER_EMAIL` |
+| POST | `/chat/:agentId/clear` | Clear chat history for a user. Query: `?email=USER_EMAIL` |
 | POST | `/admin/backfill-vectorize` | Index all existing D1 reports into Vectorize |
 
 ### Cron Handler
@@ -80,12 +81,17 @@ Core report generation flow:
 9. Log token usage to `reasoning_log`
 
 **`chat(userMessage, userEmail, userName, agentId)`**
-Returns SSE `ReadableStream`:
-1. Load recent reports (3) + chat history (last 50 messages)
-2. Resolve user name from identity mappings
-3. Save user message to SQLite
-4. Run `chatWithToolLoop()` (max 10 rounds of tool use)
-5. Stream SSE events: `delta` (text), `tool_status`, `error`, `done`
+Returns SSE `ReadableStream` via `TransformStream` for real-time token streaming:
+1. Load recent reports (3) — tries local DO storage first, falls back to D1 (chat DOs named `chat:{agentId}:{email}` never generate reports locally)
+2. Load chat history (last 50 messages)
+3. Resolve user name from identity mappings
+4. Save user message to SQLite
+5. Retrieve RAG context from Vectorize (if configured)
+6. Create `TransformStream` and kick off `chatWithToolLoop()` — writes flow to the browser in real-time as tokens arrive
+7. SSE events use proper `event:` prefixes: `event: delta`, `event: tool_status`, `event: error`, `event: done`
+
+**`clearChatHistory(agentId)`**
+Deletes all `chat_messages` from the DO's SQLite. Called via `POST /chat/:agentId/clear`.
 
 **`chatWithToolLoop()`**
 Agentic tool-use loop:
@@ -325,3 +331,5 @@ parseReportContent(raw: string): ReportContent
 7. **Model settings in D1** — Users can change models per job type without redeploying
 8. **RAG is optional** — VECTORIZE/AI bindings are optional; all RAG code checks before use and fails gracefully
 9. **Non-blocking indexing** — Report vectors are upserted via `ctx.waitUntil()` so report generation latency is unaffected
+10. **Real-time chat streaming via TransformStream** — Chat uses a `TransformStream` so tokens flow to the browser as they're generated. The DO stays alive as long as the response stream is open (no `ctx.waitUntil()` needed). SSE events include proper `event:` prefixes per the SSE spec.
+11. **Chat DO falls back to D1 for reports** — Chat DOs (named `chat:{agentId}:{email}`) don't generate reports, so their local `local_reports` table is empty. The chat method falls back to querying D1 for the agent's recent reports.

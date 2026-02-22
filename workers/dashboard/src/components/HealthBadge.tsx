@@ -3,17 +3,17 @@ import { cn } from "@/lib/utils";
 const signalConfig = {
   green: {
     label: "Healthy",
-    bg: "bg-emerald-100 text-emerald-800",
+    bg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
     dot: "bg-emerald-500",
   },
   yellow: {
     label: "Warning",
-    bg: "bg-amber-100 text-amber-800",
+    bg: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
     dot: "bg-amber-500",
   },
   red: {
     label: "Critical",
-    bg: "bg-red-100 text-red-800",
+    bg: "bg-red-500/15 text-red-400 border border-red-500/30",
     dot: "bg-red-500",
   },
 };

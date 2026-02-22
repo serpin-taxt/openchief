@@ -118,6 +118,20 @@ export default {
       return Response.json(history);
     }
 
+    // POST /chat/:agentId/clear — clear chat history for a user
+    const clearMatch = path.match(/^\/chat\/([^/]+)\/clear$/);
+    if (clearMatch && request.method === "POST") {
+      const [, agentId] = clearMatch;
+      const userEmail =
+        url.searchParams.get("email") || "anonymous@openchief";
+
+      const chatDoId = env.AGENT_DO.idFromName(`chat:${agentId}:${userEmail}`);
+      const stub = env.AGENT_DO.get(chatDoId);
+      await stub.clearChatHistory(agentId);
+
+      return Response.json({ ok: true, cleared: `chat:${agentId}:${userEmail}` });
+    }
+
     // POST /admin/backfill-vectorize — index existing reports into Vectorize
     if (path === "/admin/backfill-vectorize" && request.method === "POST") {
       if (!env.VECTORIZE || !env.AI) {

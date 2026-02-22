@@ -30,11 +30,12 @@ src/
 │   ├── Models.tsx        # AI model configuration per job type
 │   └── Login.tsx         # Password auth login page
 ├── components/
-│   ├── Layout.tsx        # Main layout with collapsible sidebar + chat widget
-│   ├── AppSidebar.tsx    # Navigation + logout button (password mode)
+│   ├── Layout.tsx        # Main layout with collapsible sidebar, mobile drawer, auto-hide header, chat widget
+│   ├── AppSidebar.tsx    # Tree navigation (exec/team agent groups, inline connections) + logout
+│   ├── DemoBanner.tsx    # Demo mode banner (accepts className for responsive placement)
 │   ├── RequireAuth.tsx   # Route guard (redirects based on auth mode)
-│   ├── ChatSidebar.tsx   # Floating chat widget (SSE streaming, tool status, config proposals)
-│   ├── HealthBadge.tsx   # Green/yellow/red status indicator
+│   ├── ChatSidebar.tsx   # Floating chat widget (SSE streaming, markdown, retry, tool status, config proposals)
+│   ├── HealthBadge.tsx   # Green/yellow/red status indicator (dark-mode-compatible)
 │   └── SourceIcon.tsx    # Lucide icon mapper for data sources
 ├── components/ui/        # shadcn/ui primitives (badge, button, card, dialog, etc.)
 ├── lib/
@@ -211,7 +212,7 @@ Three auth modes controlled by `AUTH_PROVIDER` wrangler var:
 ### Auth API Endpoints
 | Method | Route | Description |
 |--------|-------|-------------|
-| GET | `/api/auth/session` | Returns `{ authenticated, provider, email?, teamDomain? }` |
+| GET | `/api/auth/session` | Returns `{ authenticated, provider, email?, teamDomain?, demoMode?, orgName? }` |
 | POST | `/api/auth/login` | Password login (constant-time compare, sets cookie) |
 | POST | `/api/auth/logout` | Clears session cookie |
 
@@ -221,6 +222,8 @@ Three auth modes controlled by `AUTH_PROVIDER` wrangler var:
 | `AUTH_PROVIDER` | var | `"none"` / `"cloudflare-access"` / `"password"` |
 | `ADMIN_PASSWORD` | secret | Password for admin login (password mode only) |
 | `CF_ACCESS_TEAM_DOMAIN` | var | CF Access team domain for login redirect (CF Access mode only) |
+| `DEMO_MODE` | var | `"true"` to enable demo mode (read-only + demo banner) |
+| `ORG_NAME` | var | Organization name shown in sidebar header and page title |
 
 ### Identity Resolution
 Regardless of auth mode, user email is resolved via the `identity_mappings` D1 table for display names, avatars, team, and role. Falls back to email prefix if no identity found.
@@ -237,13 +240,37 @@ Connector secrets are managed via the Cloudflare API (not stored in code):
 
 ### Key Pages
 
-**Home** — Grid of agent cards (shows latest report headline, health signal, event count) + connection cards (shows status dot, event count, last activity). Planned connections shown as "coming soon" cards.
+**Home** — Grid of agent cards showing Today and Yesterday report headlines with health-signal colored dots. Cards have hover gradients based on health status. Connection cards show status dots, event counts, and last activity. Planned connections shown as "coming soon" cards.
 
-**AgentDetail** — Full agent editor with editable persona fields (role, voice, personality, instructions, output style, watch patterns). Includes event volume bar chart (Recharts), report history table, subscription list, and tools display. Save triggers PUT to create a new revision.
+**AgentDetail** — Full agent editor with editable persona fields (role, voice, personality, instructions, output style, watch patterns). Includes:
+- Latest Report card at the top (headline, health signal, link to full report)
+- 4-column mini chart grid: Health Trend (line), Event Volume (stacked bar by source), Action Items (stacked bar by priority), Severity Breakdown (stacked bar)
+- Report history: card layout on mobile, table on desktop
+- Subscription list and tools display
+- Responsive layout: `grid-cols-2 lg:grid-cols-4` for charts/config, full-width sheet drawers on mobile
+- Save triggers PUT to create a new revision
 
 **ConnectionDetail** — Settings form with reveal/hide for secrets. Shows which agents have tool access to this source. Lists recent 100 events with expandable details.
 
-**ChatSidebar** — Floating chat widget attached to the currently-viewed agent. Parses SSE stream for real-time deltas, tool status indicators, and `<config_update>` blocks (proposed agent config changes with Apply/Dismiss buttons).
+**ChatSidebar** — Floating chat widget attached to the currently-viewed agent. Features:
+- Markdown rendering (ReactMarkdown + remark-gfm) for assistant messages
+- Real-time SSE streaming with proper `event:` type parsing
+- Automatic retry (1 retry on failure, skips non-retryable errors)
+- Chat bubble entrance animation (fade-in + slide-up) for new messages only (not history)
+- Tool status indicators with animation
+- `<config_update>` blocks (proposed agent config changes with Apply/Dismiss buttons)
+
+**Layout** — Responsive layout with:
+- Desktop: collapsible fixed sidebar with hover-to-expand
+- Mobile (<768px): slide-out drawer overlay with backdrop
+- Auto-hiding sticky header on mobile: hides on scroll down, reappears on scroll up
+- Demo banner placement: static on desktop, inside sticky header on mobile
+
+**AppSidebar** — Tree navigation with:
+- Org name branding in header (from auth context)
+- Agents section: expandable tree with Exec/Team subgroups and per-agent Lucide icons
+- Connections section: expandable tree with inline status dots
+- Logout button in user footer (password mode only)
 
 ### UI Library
 

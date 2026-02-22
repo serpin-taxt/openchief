@@ -115,6 +115,10 @@ async function backfill(
   let totalEvents = 0;
   const nowMs = Date.now();
 
+  // Collect all events first, then send in batches of 100 (queue sendBatch limit)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allEvents: any[] = [];
+
   for (let d = days; d >= 1; d--) {
     // Skip weekends (less activity, not zero)
     const dayDate = new Date(nowMs - d * 24 * 60 * 60 * 1000);
@@ -136,11 +140,17 @@ async function backfill(
         event.timestamp = eventTime.toISOString();
         event.ingestedAt = new Date(eventTime.getTime() + 2000).toISOString(); // 2s "ingestion delay"
 
-        await env.EVENTS_QUEUE.send(event);
-        totalEvents++;
+        allEvents.push(event);
       }
     }
   }
+
+  // Send in batches of 100 using sendBatch (much fewer API calls)
+  for (let i = 0; i < allEvents.length; i += 100) {
+    const chunk = allEvents.slice(i, i + 100);
+    await env.EVENTS_QUEUE.sendBatch(chunk.map((body) => ({ body })));
+  }
+  totalEvents = allEvents.length;
 
   return { totalEvents, days };
 }

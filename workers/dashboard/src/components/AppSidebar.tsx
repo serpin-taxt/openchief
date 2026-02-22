@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   Bot,
@@ -7,54 +8,127 @@ import {
   Cpu,
   Cable,
   LogOut,
-  type LucideProps,
+  ChevronRight,
+  Crown,
+  DollarSign,
+  Shield,
+  Wrench,
+  BarChart3,
+  Megaphone,
+  Handshake,
+  Heart,
+  Crosshair,
+  Headset,
+  Scale,
+  TrendingUp,
+  FlaskConical,
+  Palette,
 } from "lucide-react";
-import type { CurrentUser } from "@/lib/api";
+import type { AgentDefinition } from "@openchief/shared";
+import type { ConnectionStatus, CurrentUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import type { ComponentType } from "react";
+import { SourceIcon } from "@/components/SourceIcon";
+
+// ---------------------------------------------------------------------------
+// Agent icon map
+// ---------------------------------------------------------------------------
+
+const AGENT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  "ceo": Crown,
+  "cfo": DollarSign,
+  "ciso": Shield,
+  "eng-manager": Wrench,
+  "data-analyst": BarChart3,
+  "marketing-manager": Megaphone,
+  "bizdev": Handshake,
+  "cpo": Heart,
+  "product-manager": Crosshair,
+  "customer-support": Headset,
+  "legal-counsel": Scale,
+  "cro": TrendingUp,
+  "researcher": FlaskConical,
+  "design-manager": Palette,
+};
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-interface NavItemProps {
-  href: string;
-  icon: ComponentType<LucideProps>;
-  label: string;
-  collapsed: boolean;
-  isActive: boolean;
-  trailing?: React.ReactNode;
-}
-
 function NavItem({
-  href,
-  icon: Icon,
+  to,
+  icon,
   label,
+  active,
   collapsed,
-  isActive,
   trailing,
-}: NavItemProps) {
+}: {
+  to: string;
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  collapsed: boolean;
+  trailing?: React.ReactNode;
+}) {
   return (
     <Link
-      to={href}
+      to={to}
       title={collapsed ? label : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
         collapsed ? "justify-center" : "",
-        isActive
-          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
       )}
     >
-      <Icon className="h-4 w-4 shrink-0" />
+      <span className="shrink-0">{icon}</span>
+      {!collapsed && <span className="truncate">{label}</span>}
+      {trailing}
+    </Link>
+  );
+}
+
+function NavToggle({
+  icon,
+  label,
+  open,
+  onToggle,
+  collapsed,
+  childActive,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  collapsed: boolean;
+  childActive: boolean;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+        collapsed ? "justify-center" : "",
+        childActive
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
       {!collapsed && (
         <>
-          <span className="truncate flex-1">{label}</span>
-          {trailing}
+          <span className="truncate">{label}</span>
+          <ChevronRight
+            className={cn(
+              "ml-auto h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-200",
+              open ? "rotate-90" : "",
+            )}
+          />
         </>
       )}
-    </Link>
+    </button>
   );
 }
 
@@ -63,18 +137,36 @@ function NavItem({
 // ---------------------------------------------------------------------------
 
 interface AppSidebarProps {
-  agents: unknown[];
-  connections: unknown[];
+  agents: AgentDefinition[];
+  connections: ConnectionStatus[];
   user: CurrentUser | null;
   collapsed: boolean;
 }
 
 export function AppSidebar({
+  agents,
+  connections,
   user,
   collapsed,
 }: AppSidebarProps) {
   const location = useLocation();
-  const { provider, logout } = useAuth();
+  const { provider, logout, orgName } = useAuth();
+
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(path + "/");
+
+  const execAgents = agents.filter((a) => a.visibility === "exec");
+  const teamAgents = agents.filter((a) => a.visibility !== "exec");
+
+  const anyAgentActive = agents.some((a) => isActive(`/modules/${a.id}`));
+  const anyConnectionActive = connections.some((c) => isActive(`/connections/${c.source}`));
+
+  const [agentsOpen, setAgentsOpen] = useState(
+    () => anyAgentActive,
+  );
+  const [connectionsOpen, setConnectionsOpen] = useState(
+    () => anyConnectionActive,
+  );
 
   // Derive initials from user
   const initials = user?.displayName
@@ -90,10 +182,7 @@ export function AppSidebar({
     <>
       {/* Header */}
       <div
-        className={cn(
-          "flex h-14 shrink-0 items-center gap-2 border-b px-4",
-          collapsed ? "justify-center px-2" : "",
-        )}
+        className="flex h-14 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-b px-4"
       >
         <svg className="h-6 w-6 shrink-0 text-sidebar-primary" viewBox="6 12 52 42" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M10 44C10 44 18 50 32 50C46 50 54 44 54 44" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -101,59 +190,139 @@ export function AppSidebar({
           <path d="M54 44L50 22L40 36" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           <path d="M24 36L32 16L40 36" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </svg>
-        {!collapsed && (
-          <span className="text-lg font-semibold tracking-tight text-sidebar-foreground">
-            OpenChief
-          </span>
-        )}
+        <span
+          className={cn(
+            "text-lg font-semibold tracking-tight text-sidebar-foreground transition-opacity duration-200",
+            collapsed ? "opacity-0" : "opacity-100",
+          )}
+        >
+          {orgName || "OpenChief"}
+        </span>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         <NavItem
-          href="/"
-          icon={Home}
+          to="/"
+          icon={<Home className="h-4 w-4" />}
           label="Home"
+          active={location.pathname === "/"}
           collapsed={collapsed}
-          isActive={location.pathname === "/"}
         />
-        <NavItem
-          href="/agents"
-          icon={Bot}
+
+        {/* Agents — toggleable */}
+        <NavToggle
+          icon={<Bot className="h-4 w-4" />}
           label="Agents"
+          open={agentsOpen}
+          onToggle={() => setAgentsOpen((o) => !o)}
           collapsed={collapsed}
-          isActive={
-            location.pathname === "/agents" ||
-            location.pathname.startsWith("/modules/")
-          }
+          childActive={anyAgentActive}
         />
+        {agentsOpen && !collapsed && (
+          <div className="ml-4">
+            {execAgents.length > 0 && (
+              <>
+                <p className="mb-0.5 mt-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-amber-500/70">
+                  Exec
+                </p>
+                {execAgents.map((agent) => {
+                  const Icon = AGENT_ICONS[agent.id] || Bot;
+                  return (
+                    <NavItem
+                      key={agent.id}
+                      to={`/modules/${agent.id}`}
+                      icon={<Icon className="h-4 w-4" />}
+                      label={agent.name}
+                      active={isActive(`/modules/${agent.id}`)}
+                      collapsed={collapsed}
+                    />
+                  );
+                })}
+              </>
+            )}
+            {teamAgents.length > 0 && execAgents.length > 0 && (
+              <p className="mb-0.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                Team
+              </p>
+            )}
+            {teamAgents.map((agent) => {
+              const Icon = AGENT_ICONS[agent.id] || Bot;
+              return (
+                <NavItem
+                  key={agent.id}
+                  to={`/modules/${agent.id}`}
+                  icon={<Icon className="h-4 w-4" />}
+                  label={agent.name}
+                  active={isActive(`/modules/${agent.id}`)}
+                  collapsed={collapsed}
+                />
+              );
+            })}
+            {agents.length === 0 && (
+              <p className="px-2 py-1 text-xs text-muted-foreground">No agents yet</p>
+            )}
+          </div>
+        )}
+
         <NavItem
-          href="/team"
-          icon={Users}
+          to="/team"
+          icon={<Users className="h-4 w-4" />}
           label="Humans"
+          active={isActive("/team")}
           collapsed={collapsed}
-          isActive={location.pathname.startsWith("/team")}
         />
-        <NavItem
-          href="/connections"
-          icon={Cable}
+
+        {/* Connections — toggleable */}
+        <NavToggle
+          icon={<Cable className="h-4 w-4" />}
           label="Connections"
+          open={connectionsOpen}
+          onToggle={() => setConnectionsOpen((o) => !o)}
           collapsed={collapsed}
-          isActive={location.pathname.startsWith("/connections")}
+          childActive={anyConnectionActive}
         />
+        {connectionsOpen && !collapsed && (
+          <div className="ml-4">
+            {connections.map((conn) => (
+              <NavItem
+                key={conn.source}
+                to={`/connections/${conn.source}`}
+                icon={<SourceIcon name={conn.source} className="h-4 w-4" />}
+                label={conn.label}
+                active={isActive(`/connections/${conn.source}`)}
+                collapsed={collapsed}
+                trailing={
+                  !collapsed ? (
+                    <span
+                      className={cn(
+                        "ml-auto inline-block h-2 w-2 rounded-full",
+                        conn.lastEventAt ? "bg-emerald-400" : "bg-muted",
+                      )}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
+            {connections.length === 0 && (
+              <p className="px-2 py-1 text-xs text-muted-foreground">No connections</p>
+            )}
+          </div>
+        )}
+
         <NavItem
-          href="/jobs"
-          icon={CalendarClock}
+          to="/jobs"
+          icon={<CalendarClock className="h-4 w-4" />}
           label="Jobs"
+          active={isActive("/jobs")}
           collapsed={collapsed}
-          isActive={location.pathname.startsWith("/jobs")}
         />
         <NavItem
-          href="/models"
-          icon={Cpu}
+          to="/models"
+          icon={<Cpu className="h-4 w-4" />}
           label="Models"
+          active={isActive("/models")}
           collapsed={collapsed}
-          isActive={location.pathname.startsWith("/models")}
         />
       </nav>
 

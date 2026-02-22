@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   History,
@@ -17,15 +17,16 @@ import {
   Plug,
   FileText,
   ScrollText,
+  TrendingUp,
+  Activity,
 } from "lucide-react";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
+  CartesianGrid,
   XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
 import type {
   AgentDefinition,
@@ -35,15 +36,22 @@ import type {
 } from "@openchief/shared";
 import { toast } from "sonner";
 import { api, type EventVolumeBucket } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardFooter,
   CardHeader,
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -162,30 +170,62 @@ const CONFIG_CARDS: CardDef[] = [
 /*  Chart helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-const CHART_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-];
-
-function buildChartData(
-  buckets: EventVolumeBucket[],
-): { date: string; [source: string]: string | number }[] {
-  const byDate = new Map<string, Record<string, number>>();
-  for (const b of buckets) {
-    const rec = byDate.get(b.date) ?? {};
-    rec[b.source] = (rec[b.source] ?? 0) + b.count;
-    byDate.set(b.date, rec);
-  }
-  return Array.from(byDate.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, sources]) => ({ date, ...sources }));
+/** Build unique date labels for chart X-axis from report timestamps.
+ *  When multiple reports share the same day, appends the time to disambiguate. */
+function buildDateLabels(reports: AgentReport[]): string[] {
+  const raw = reports.map((r) =>
+    new Date(r.createdAt).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+  // Count occurrences
+  const counts: Record<string, number> = {};
+  for (const d of raw) counts[d] = (counts[d] || 0) + 1;
+  // If any duplicate, append time for ALL entries to keep consistent formatting
+  const hasDupes = Object.values(counts).some((c) => c > 1);
+  if (!hasDupes) return raw;
+  return reports.map((r) => {
+    const d = new Date(r.createdAt);
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  });
 }
 
-function uniqueSources(buckets: EventVolumeBucket[]): string[] {
-  return [...new Set(buckets.map((b) => b.source))];
+const SIGNAL_VALUE: Record<string, number> = {
+  green: 3,
+  yellow: 2,
+  red: 1,
+};
+
+const healthChartConfig = {
+  health: { label: "Health", color: "var(--chart-1)" },
+} satisfies ChartConfig;
+
+const SOURCE_COLORS: Record<string, string> = {
+  github: "#34d399",
+  slack: "#fbbf24",
+  discord: "#818cf8",
+  intercom: "#f472b6",
+  jira: "#60a5fa",
+  "jira-product-discovery": "#a78bfa",
+  twitter: "#38bdf8",
+  figma: "#fb923c",
+  stripe: "#c084fc",
+  amplitude: "#2dd4bf",
+  "google-calendar": "#f97316",
+  "google-analytics": "#4ade80",
+  quickbooks: "#22d3ee",
+  rippling: "#e879f9",
+  notion: "#a3a3a3",
+};
+
+function getSourceColor(source: string): string {
+  return SOURCE_COLORS[source] || "var(--chart-3)";
 }
 
 /* ------------------------------------------------------------------ */
@@ -199,11 +239,10 @@ export function AgentDetail() {
   const [volumeData, setVolumeData] = useState<EventVolumeBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [openDrawer, setOpenDrawer] = useState<CardId | null>(null);
-  const [hasAvatar, setHasAvatar] = useState(false);
-  const [avatarVersion, setAvatarVersion] = useState(0);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const avatarUrl = id ? `/api/agents/${id}/avatar?v=${avatarVersion}` : "";
+  const hasAvatar = !!avatarUrl;
 
   const handleAvatarUpload = useCallback(
     async (file: File) => {
@@ -216,8 +255,7 @@ export function AgentDetail() {
           body: file,
         });
         if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-        setAvatarVersion((v) => v + 1);
-        setHasAvatar(true);
+        setAvatarUrl(`/api/agents/${id}/avatar?v=${Date.now()}`);
         toast.success("Avatar uploaded", { id: toastId });
       } catch (err) {
         console.error("Avatar upload failed:", err);
@@ -232,7 +270,7 @@ export function AgentDetail() {
     try {
       const agentData = await api.get<AgentDefinition & { avatarUrl?: string | null }>(`agents/${id}`);
       setAgent(agentData);
-      setHasAvatar(!!agentData.avatarUrl);
+      setAvatarUrl(agentData.avatarUrl ?? null);
 
       const [reportList, volume] = await Promise.allSettled([
         api.get<AgentReport[]>(`agents/${id}/reports`),
@@ -277,39 +315,34 @@ export function AgentDetail() {
     );
   }
 
-  const chartData = buildChartData(volumeData);
-  const sources = uniqueSources(volumeData);
-
   return (
     <div className="relative space-y-6">
-      {/* Avatar background image */}
+      {/* Avatar background image — breaks out of max-w container to span full viewport */}
       {hasAvatar && (
-        <div className="absolute -top-6 -left-6 -right-6 h-[512px] overflow-hidden pointer-events-none">
+        <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-screen h-[512px] overflow-hidden pointer-events-none">
           <img
             src={avatarUrl}
             alt=""
-            className="h-full w-full object-cover object-top opacity-40"
+            className="h-full w-full object-cover object-top opacity-50 grayscale"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-background from-5% via-background/70 via-50% to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-background from-15% via-background/80 via-55% to-background/30" />
         </div>
       )}
 
       {/* Page Header */}
-      <div className="relative flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-            <Link to="/" className="hover:text-foreground">
-              Dashboard
-            </Link>
-            <ChevronRight className="h-3 w-3" />
-            <span>{agent.name}</span>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {agent.name}
-          </h1>
-          <p className="mt-1 text-muted-foreground">{agent.description}</p>
+      <div className="relative">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+          <Link to="/" className="hover:text-foreground">
+            Dashboard
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <span>{agent.name}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {agent.name}
+        </h1>
+        <p className="mt-1 text-muted-foreground">{agent.description}</p>
+        <div className="mt-3 flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -339,10 +372,49 @@ export function AgentDetail() {
         </div>
       </div>
 
+      {/* Latest Report */}
+      {reports.length > 0 && (() => {
+        const latest = reports[0];
+        const signal = latest.content?.healthSignal ?? null;
+        const borderClass = signal === "green" ? "hover:border-emerald-500/60" : signal === "yellow" ? "hover:border-amber-500/60" : signal === "red" ? "hover:border-red-500/60" : "";
+        const bgClass = signal === "green" ? "hover:bg-emerald-500/[0.08]" : signal === "yellow" ? "hover:bg-amber-500/[0.08]" : signal === "red" ? "hover:bg-red-500/[0.08]" : "";
+        const dotClass = signal === "green" ? "bg-emerald-500" : signal === "yellow" ? "bg-amber-500" : signal === "red" ? "bg-red-500" : "bg-muted-foreground/30";
+        return (
+          <section className="relative">
+            <h2 className="mb-3 text-lg font-medium">Latest Report</h2>
+            <Link to={`/modules/${id}/reports/${latest.id}`}>
+              <div className={cn("flex items-start gap-3 rounded-lg border border-border p-4 transition-all", borderClass, bgClass)}>
+                <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
+                <div className="min-w-0 flex-1">
+                  <p className="line-clamp-2 text-sm leading-snug font-medium">
+                    {latest.content?.headline ?? "Untitled report"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatDate(latest.createdAt)} &middot; {latest.reportType}
+                  </p>
+                </div>
+              </div>
+            </Link>
+          </section>
+        );
+      })()}
+
+      {/* Charts Grid */}
+      {reports.length > 0 && (
+        <section className="relative">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <HealthTrendChart reports={reports} />
+            <EventVolumeChart data={volumeData} />
+            <ActionItemsChart reports={reports} />
+            <SeverityBreakdownChart reports={reports} />
+          </div>
+        </section>
+      )}
+
       {/* Config Cards Grid */}
       <section className="relative">
         <h2 className="mb-3 text-lg font-medium">Configuration</h2>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {CONFIG_CARDS.map((card) => {
             const Icon = card.icon;
             return (
@@ -371,7 +443,7 @@ export function AgentDetail() {
         open={openDrawer === "role"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Role</SheetTitle>
           </SheetHeader>
@@ -395,7 +467,7 @@ export function AgentDetail() {
         open={openDrawer === "voice"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Voice</SheetTitle>
           </SheetHeader>
@@ -422,7 +494,7 @@ export function AgentDetail() {
         open={openDrawer === "personality"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Personality</SheetTitle>
           </SheetHeader>
@@ -449,7 +521,7 @@ export function AgentDetail() {
         open={openDrawer === "output-style"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Output Style</SheetTitle>
           </SheetHeader>
@@ -473,7 +545,7 @@ export function AgentDetail() {
         open={openDrawer === "watch-patterns"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Watch Patterns</SheetTitle>
           </SheetHeader>
@@ -497,7 +569,7 @@ export function AgentDetail() {
         open={openDrawer === "sources"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Sources &amp; Tools</SheetTitle>
           </SheetHeader>
@@ -530,7 +602,7 @@ export function AgentDetail() {
         open={openDrawer === "report-types"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Report Types</SheetTitle>
           </SheetHeader>
@@ -552,7 +624,7 @@ export function AgentDetail() {
         open={openDrawer === "instructions"}
         onOpenChange={(open) => !open && setOpenDrawer(null)}
       >
-        <SheetContent className="w-[500px] sm:max-w-[600px] overflow-y-auto">
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Instructions</SheetTitle>
           </SheetHeader>
@@ -572,97 +644,79 @@ export function AgentDetail() {
         </SheetContent>
       </Sheet>
 
-      {/* Event Volume Chart */}
-      {chartData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Event Volume</CardTitle>
-            <CardDescription>
-              Daily event volume by source (last 30 days)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={(d: string) =>
-                      new Date(d).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })
-                    }
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      fontSize: 12,
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                    }}
-                  />
-                  <Legend />
-                  {sources.map((source, i) => (
-                    <Bar
-                      key={source}
-                      dataKey={source}
-                      stackId="volume"
-                      fill={CHART_COLORS[i % CHART_COLORS.length]}
-                      radius={
-                        i === sources.length - 1 ? [4, 4, 0, 0] : undefined
-                      }
-                    />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Past Reports */}
       <section>
         <h2 className="mb-3 text-lg font-medium">Past Reports</h2>
         {reports.length > 0 ? (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Report Type</TableHead>
-                  <TableHead>Health</TableHead>
-                  <TableHead>Headline</TableHead>
-                  <TableHead className="text-right">Date</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reports.map((report) => (
-                  <TableRow key={report.id}>
-                    <TableCell>
-                      <Badge variant="outline">{report.reportType}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <HealthBadge
-                        signal={report.content?.healthSignal ?? "green"}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/modules/${id}/reports/${report.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {report.content?.headline ?? "Untitled report"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {formatDate(report.createdAt)}
-                    </TableCell>
+          <>
+            {/* Mobile: card list */}
+            <div className="space-y-2 sm:hidden">
+              {reports.map((report) => {
+                const signal = report.content?.healthSignal ?? "green";
+                const dotClass = signal === "green" ? "bg-emerald-500" : signal === "yellow" ? "bg-amber-500" : signal === "red" ? "bg-red-500" : "bg-muted-foreground/30";
+                return (
+                  <Link
+                    key={report.id}
+                    to={`/modules/${id}/reports/${report.id}`}
+                    className="block rounded-lg border border-border p-3 transition-colors hover:bg-secondary/50"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotClass)} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium leading-snug line-clamp-2">
+                          {report.content?.headline ?? "Untitled report"}
+                        </p>
+                        <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            {report.reportType}
+                          </Badge>
+                          <span>{formatDate(report.createdAt)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+            {/* Desktop: table */}
+            <div className="hidden sm:block rounded-lg border border-border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Report Type</TableHead>
+                    <TableHead>Health</TableHead>
+                    <TableHead>Headline</TableHead>
+                    <TableHead className="text-right">Date</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {reports.map((report) => (
+                    <TableRow key={report.id}>
+                      <TableCell>
+                        <Badge variant="outline">{report.reportType}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <HealthBadge
+                          signal={report.content?.healthSignal ?? "green"}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/modules/${id}/reports/${report.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {report.content?.headline ?? "Untitled report"}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {formatDate(report.createdAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         ) : (
           <p className="text-sm text-muted-foreground">
             No reports generated yet.
@@ -670,6 +724,470 @@ export function AgentDetail() {
         )}
       </section>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  HealthTrendChart                                                   */
+/* ------------------------------------------------------------------ */
+
+function HealthTrendChart({ reports }: { reports: AgentReport[] }) {
+  const data = useMemo(() => {
+    const filtered = reports
+      .filter((r) => r.content?.healthSignal)
+      .slice(0, 14)
+      .reverse();
+    const labels = buildDateLabels(filtered);
+    return filtered.map((r, i) => ({
+      id: r.id,
+      date: labels[i],
+      health: SIGNAL_VALUE[r.content.healthSignal] || 3,
+      signal: r.content.healthSignal,
+    }));
+  }, [reports]);
+
+  const trend = useMemo(() => {
+    if (data.length < 2) return null;
+    const recent = data.slice(-3);
+    const earlier = data.slice(0, 3);
+    const recentAvg = recent.reduce((s, d) => s + d.health, 0) / recent.length;
+    const earlierAvg =
+      earlier.reduce((s, d) => s + d.health, 0) / earlier.length;
+    const diff = recentAvg - earlierAvg;
+    if (Math.abs(diff) < 0.1) return null;
+    return diff > 0 ? "up" : "down";
+  }, [data]);
+
+  const latestSignal =
+    data.length > 0 ? data[data.length - 1].signal : "green";
+
+  return (
+    <Card className="flex flex-col gap-0 py-3">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm">Health Trend</CardTitle>
+        <CardDescription className="text-xs">
+          Last {data.length} reports
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex-1 pb-0">
+        {data.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground/40">
+            <Activity className="h-8 w-8" />
+            <span className="text-xs font-medium">No reports yet</span>
+          </div>
+        ) : (
+          <ChartContainer
+            config={healthChartConfig}
+            className="aspect-auto h-[120px] w-full"
+          >
+            <LineChart
+              accessibilityLayer
+              data={data}
+              margin={{ left: 8, right: 8, top: 8, bottom: 0 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                tickFormatter={(value) => value.slice(0, 3)}
+                tick={{ fontSize: 10 }}
+              />
+              <ChartTooltip
+                cursor={false}
+                content={<ChartTooltipContent hideLabel />}
+              />
+              <Line
+                dataKey="health"
+                type="linear"
+                stroke={
+                  latestSignal === "green"
+                    ? "#34d399"
+                    : latestSignal === "yellow"
+                      ? "#fbbf24"
+                      : "#f87171"
+                }
+                strokeWidth={2}
+                dot={{ r: data.length <= 3 ? 4 : 0, fill: latestSignal === "green" ? "#34d399" : latestSignal === "yellow" ? "#fbbf24" : "#f87171" }}
+              />
+            </LineChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+      <CardFooter className="pt-1 pb-0 px-4">
+        {trend ? (
+          <div className="flex gap-2 text-xs leading-none font-medium">
+            {trend === "up" ? "Trending healthier" : "Declining health"}
+            <TrendingUp
+              className={`h-3 w-3 ${trend === "down" ? "rotate-180" : ""}`}
+            />
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground leading-none">
+            {data.length === 1 ? "1 report so far" : "Stable health signal"}
+          </div>
+        )}
+      </CardFooter>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  EventVolumeChart                                                   */
+/* ------------------------------------------------------------------ */
+
+function EventVolumeChart({ data }: { data: EventVolumeBucket[] }) {
+  const { sources, chartData, totalEvents } = useMemo(() => {
+    if (data.length === 0)
+      return {
+        sources: [] as string[],
+        chartData: [] as Record<string, unknown>[],
+        totalEvents: 0,
+      };
+
+    const srcSet = new Set(data.map((d) => d.source));
+    const sources = [...srcSet].sort();
+
+    const byDate: Record<string, Record<string, number>> = {};
+    let totalEvents = 0;
+    for (const row of data) {
+      if (!byDate[row.date]) byDate[row.date] = {};
+      byDate[row.date][row.source] = row.count;
+      totalEvents += row.count;
+    }
+
+    const chartData: Record<string, unknown>[] = [];
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
+      const entry: Record<string, unknown> = { date: label };
+      for (const src of sources) {
+        entry[src] = byDate[key]?.[src] || 0;
+      }
+      chartData.push(entry);
+    }
+
+    return { sources, chartData, totalEvents };
+  }, [data]);
+
+  const chartConfig = useMemo(() => {
+    const cfg: ChartConfig = {};
+    for (const src of sources) {
+      cfg[src] = {
+        label: src.charAt(0).toUpperCase() + src.slice(1),
+        color: getSourceColor(src),
+      };
+    }
+    return cfg;
+  }, [sources]);
+
+  return (
+    <Card className="flex flex-col gap-0 py-3">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm">Event Volume</CardTitle>
+        <CardDescription className="text-xs">
+          Last 30 days by source
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex-1 pb-0">
+        {sources.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground/40">
+            <Activity className="h-8 w-8" />
+            <span className="text-xs font-medium">No events yet</span>
+          </div>
+        ) : (
+          <ChartContainer
+            config={chartConfig}
+            className="aspect-auto h-[120px] w-full"
+          >
+            <BarChart
+              accessibilityLayer
+              data={chartData}
+              margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                tickFormatter={(v) => v.slice(0, 3)}
+                tick={{ fontSize: 10 }}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {sources.map((src, i) => (
+                <Bar
+                  key={src}
+                  dataKey={src}
+                  stackId="a"
+                  fill={getSourceColor(src)}
+                  radius={
+                    i === sources.length - 1
+                      ? [2, 2, 0, 0]
+                      : [0, 0, 0, 0]
+                  }
+                />
+              ))}
+            </BarChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+      <CardFooter className="pt-1 pb-0 px-4">
+        <div className="text-xs text-muted-foreground leading-none">
+          {totalEvents > 0
+            ? `${totalEvents.toLocaleString()} events from ${sources.length} source${sources.length === 1 ? "" : "s"}`
+            : "Waiting for events"}
+        </div>
+      </CardFooter>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ActionItemsChart                                                   */
+/* ------------------------------------------------------------------ */
+
+const actionItemsChartConfig = {
+  low: { label: "Low", color: "var(--color-muted-foreground)" },
+  medium: { label: "Medium", color: "#34d399" },
+  high: { label: "High", color: "#fbbf24" },
+  critical: { label: "Critical", color: "#f87171" },
+} satisfies ChartConfig;
+
+const PRIORITY_COLORS: Record<string, string> = {
+  low: "#a3a3a3",
+  medium: "#34d399",
+  high: "#fbbf24",
+  critical: "#f87171",
+};
+
+function ActionItemsChart({ reports }: { reports: AgentReport[] }) {
+  const { data, totalItems, trend } = useMemo(() => {
+    const filtered = reports
+      .filter((r) => r.content?.actionItems)
+      .slice(0, 14)
+      .reverse();
+    const labels = buildDateLabels(filtered);
+    const data = filtered.map((r, i) => {
+      const items = r.content.actionItems || [];
+      const counts: Record<string, number> = {
+        low: 0,
+        medium: 0,
+        high: 0,
+        critical: 0,
+      };
+      for (const item of items) {
+        counts[item.priority] = (counts[item.priority] || 0) + 1;
+      }
+      return {
+        date: labels[i],
+        ...counts,
+        total: items.length,
+      };
+    });
+
+    const totalItems = data.reduce((s, d) => s + d.total, 0);
+
+    let trend: "up" | "down" | null = null;
+    if (data.length >= 4) {
+      const recentAvg =
+        data.slice(-3).reduce((s, d) => s + d.total, 0) / 3;
+      const earlierAvg =
+        data.slice(0, 3).reduce((s, d) => s + d.total, 0) / 3;
+      const diff = recentAvg - earlierAvg;
+      if (Math.abs(diff) >= 0.5) trend = diff > 0 ? "up" : "down";
+    }
+
+    return { data, totalItems, trend };
+  }, [reports]);
+
+  return (
+    <Card className="flex flex-col gap-0 py-3">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm">Action Items</CardTitle>
+        <CardDescription className="text-xs">
+          By priority per report
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex-1 pb-0">
+        {data.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground/40">
+            <Activity className="h-8 w-8" />
+            <span className="text-xs font-medium">No reports yet</span>
+          </div>
+        ) : (
+          <ChartContainer
+            config={actionItemsChartConfig}
+            className="aspect-auto h-[120px] w-full"
+          >
+            <BarChart
+              accessibilityLayer
+              data={data}
+              margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                tickFormatter={(v) => v.slice(0, 3)}
+                tick={{ fontSize: 10 }}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {(["low", "medium", "high", "critical"] as const).map(
+                (priority, i) => (
+                  <Bar
+                    key={priority}
+                    dataKey={priority}
+                    stackId="a"
+                    fill={PRIORITY_COLORS[priority]}
+                    radius={i === 3 ? [2, 2, 0, 0] : [0, 0, 0, 0]}
+                  />
+                ),
+              )}
+            </BarChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+      <CardFooter className="pt-1 pb-0 px-4">
+        {trend ? (
+          <div className="flex gap-2 text-xs leading-none font-medium">
+            {trend === "up" ? "More items recently" : "Fewer items recently"}
+            <TrendingUp
+              className={`h-3 w-3 ${trend === "down" ? "rotate-180" : ""}`}
+            />
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground leading-none">
+            {totalItems > 0
+              ? `${totalItems} items across ${data.length} reports`
+              : "No action items yet"}
+          </div>
+        )}
+      </CardFooter>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  SeverityBreakdownChart                                             */
+/* ------------------------------------------------------------------ */
+
+const SEVERITY_COLORS: Record<string, string> = {
+  info: "#60a5fa",
+  warning: "#fbbf24",
+  critical: "#f87171",
+};
+
+const severityChartConfig = {
+  info: { label: "Info", color: "#60a5fa" },
+  warning: { label: "Warning", color: "#fbbf24" },
+  critical: { label: "Critical", color: "#f87171" },
+} satisfies ChartConfig;
+
+function SeverityBreakdownChart({ reports }: { reports: AgentReport[] }) {
+  const { data, dominant } = useMemo(() => {
+    const filtered = reports
+      .filter((r) => r.content?.sections?.length)
+      .slice(0, 14)
+      .reverse();
+    const labels = buildDateLabels(filtered);
+    const data = filtered.map((r, i) => {
+      const counts: Record<string, number> = {
+        info: 0,
+        warning: 0,
+        critical: 0,
+      };
+      for (const section of r.content.sections) {
+        counts[section.severity] = (counts[section.severity] || 0) + 1;
+      }
+      return {
+        date: labels[i],
+        ...counts,
+      };
+    });
+
+    // Find dominant severity across all reports
+    const totals = { info: 0, warning: 0, critical: 0 };
+    for (const d of data) {
+      totals.info += d.info;
+      totals.warning += d.warning;
+      totals.critical += d.critical;
+    }
+    const total = totals.info + totals.warning + totals.critical;
+    let dominant: string | null = null;
+    if (total > 0) {
+      if (totals.critical / total > 0.3) dominant = "Mostly critical";
+      else if (totals.warning / total > 0.4) dominant = "Elevated warnings";
+      else dominant = "Mostly stable";
+    }
+
+    return { data, dominant };
+  }, [reports]);
+
+  return (
+    <Card className="flex flex-col gap-0 py-3">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm">Section Severity</CardTitle>
+        <CardDescription className="text-xs">
+          Report sections by severity
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex-1 pb-0">
+        {data.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground/40">
+            <Activity className="h-8 w-8" />
+            <span className="text-xs font-medium">No reports yet</span>
+          </div>
+        ) : (
+          <ChartContainer
+            config={severityChartConfig}
+            className="aspect-auto h-[120px] w-full"
+          >
+            <BarChart
+              accessibilityLayer
+              data={data}
+              margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                tickFormatter={(v) => v.slice(0, 3)}
+                tick={{ fontSize: 10 }}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {(["info", "warning", "critical"] as const).map(
+                (severity, i) => (
+                  <Bar
+                    key={severity}
+                    dataKey={severity}
+                    stackId="a"
+                    fill={SEVERITY_COLORS[severity]}
+                    radius={i === 2 ? [2, 2, 0, 0] : [0, 0, 0, 0]}
+                  />
+                ),
+              )}
+            </BarChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+      <CardFooter className="pt-1 pb-0 px-4">
+        <div className="text-xs text-muted-foreground leading-none">
+          {dominant || "No section data yet"}
+        </div>
+      </CardFooter>
+    </Card>
   );
 }
 
