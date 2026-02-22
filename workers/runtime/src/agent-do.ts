@@ -165,8 +165,10 @@ export class AgentDurableObject extends DurableObject<Env> {
       return this.sseError("Agent config not found");
     }
 
-    // Load recent reports from local DO storage
-    const recentReports = this.ctx.storage.sql
+    // Load recent reports — try local DO storage first, fall back to D1.
+    // Chat DOs (named chat:{agentId}:{email}) don't generate reports, so
+    // their local_reports table is empty. D1 has the actual reports.
+    let recentReports = this.ctx.storage.sql
       .exec(
         `SELECT report_type, content, created_at FROM local_reports
          ORDER BY created_at DESC LIMIT 3`
@@ -177,6 +179,24 @@ export class AgentDurableObject extends DurableObject<Env> {
         content: r.content as string,
         createdAt: r.created_at as string,
       }));
+
+    if (recentReports.length === 0) {
+      try {
+        const { results } = await this.env.DB.prepare(
+          `SELECT report_type, content, created_at FROM reports
+           WHERE agent_id = ? ORDER BY created_at DESC LIMIT 3`
+        )
+          .bind(config.id)
+          .all<{ report_type: string; content: string; created_at: string }>();
+        recentReports = (results || []).map((r) => ({
+          reportType: r.report_type,
+          content: r.content,
+          createdAt: r.created_at,
+        }));
+      } catch (err) {
+        console.error("Failed to load reports from D1:", err);
+      }
+    }
 
     // Load chat history (last 50 messages)
     const history = this.ctx.storage.sql
@@ -240,42 +260,49 @@ export class AgentDurableObject extends DurableObject<Env> {
     // Get tools from agent's config-driven tools array
     const tools = getAgentTools(config.tools || []);
 
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
     const encoder = new TextEncoder();
     const sql = this.ctx.storage.sql;
     const env = this.env;
     const configName = config.name;
 
-    this.ctx.waitUntil(
-      (async () => {
+    // Stream SSE events in real-time via a TransformStream.
+    // The DO stays alive as long as the response stream is open —
+    // no ctx.waitUntil() needed.
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+
+    const sseWriter = {
+      write: (chunk: Uint8Array) => writer.write(chunk),
+      close: () => writer.close(),
+    };
+
+    // Kick off the chat processing — writes flow through to the browser
+    // as each SSE event is generated (real-time token streaming).
+    this.chatWithToolLoop(
+      systemPrompt,
+      messages,
+      tools,
+      sseWriter,
+      encoder,
+      sql,
+      env,
+      configName
+    )
+      .catch(async (err) => {
+        console.error("Chat processing error:", err);
         try {
-          await this.chatWithToolLoop(
-            systemPrompt,
-            messages,
-            tools,
-            writer,
-            encoder,
-            sql,
-            env,
-            configName
+          await writer.write(
+            encoder.encode(
+              `event: error\ndata: ${JSON.stringify({ type: "error", text: "An error occurred" })}\n\n`
+            )
           );
-        } catch (err) {
-          console.error("Chat processing error:", err);
-          try {
-            await writer.write(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "error", text: "An error occurred" })}\n\n`
-              )
-            );
-          } catch {
-            /* writer may be closed */
-          }
-        } finally {
-          await writer.close();
+        } catch {
+          // Stream may already be closed
         }
-      })()
-    );
+      })
+      .finally(() => {
+        writer.close().catch(() => {});
+      });
 
     return readable;
   }
@@ -287,7 +314,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     systemPrompt: string,
     messages: Array<{ role: string; content: unknown }>,
     tools: ToolDefinition[],
-    writer: WritableStreamDefaultWriter,
+    writer: { write: (chunk: Uint8Array) => Promise<void>; close: () => Promise<void> },
     encoder: TextEncoder,
     sql: SqlStorage,
     env: Env,
@@ -326,7 +353,7 @@ export class AgentDurableObject extends DurableObject<Env> {
         console.error(`Claude API error (round ${round}): ${errorText}`);
         await writer.write(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "error", text: "Failed to get response from Claude" })}\n\n`
+            `event: error\ndata: ${JSON.stringify({ type: "error", text: "Failed to get response from Claude" })}\n\n`
           )
         );
         return;
@@ -384,7 +411,7 @@ export class AgentDurableObject extends DurableObject<Env> {
         fullText += roundText;
         await writer.write(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "delta", text: roundText })}\n\n`
+            `event: delta\ndata: ${JSON.stringify({ type: "delta", text: roundText })}\n\n`
           )
         );
       }
@@ -400,7 +427,7 @@ export class AgentDurableObject extends DurableObject<Env> {
           new Date().toISOString()
         );
         await writer.write(
-          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+          encoder.encode(`event: done\ndata: ${JSON.stringify({ type: "done" })}\n\n`)
         );
         return;
       }
@@ -427,7 +454,7 @@ export class AgentDurableObject extends DurableObject<Env> {
 
         await writer.write(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "tool_status", tool: tool.name, status: toolLabel })}\n\n`
+            `event: tool_status\ndata: ${JSON.stringify({ type: "tool_status", tool: tool.name, status: toolLabel })}\n\n`
           )
         );
 
@@ -461,7 +488,7 @@ export class AgentDurableObject extends DurableObject<Env> {
       );
     }
     await writer.write(
-      encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+      encoder.encode(`event: done\ndata: ${JSON.stringify({ type: "done" })}\n\n`)
     );
   }
 
@@ -470,7 +497,7 @@ export class AgentDurableObject extends DurableObject<Env> {
    */
   private async streamAnthropicResponse(
     body: ReadableStream,
-    writer: WritableStreamDefaultWriter,
+    writer: { write: (chunk: Uint8Array) => Promise<void>; close: () => Promise<void> },
     encoder: TextEncoder,
     existingText: string,
     sql: SqlStorage,
@@ -501,7 +528,7 @@ export class AgentDurableObject extends DurableObject<Env> {
               fullText += event.delta.text;
               await writer.write(
                 encoder.encode(
-                  `data: ${JSON.stringify({ type: "delta", text: event.delta.text })}\n\n`
+                  `event: delta\ndata: ${JSON.stringify({ type: "delta", text: event.delta.text })}\n\n`
                 )
               );
             } else if (event.type === "message_stop") {
@@ -516,7 +543,7 @@ export class AgentDurableObject extends DurableObject<Env> {
               );
               await writer.write(
                 encoder.encode(
-                  `data: ${JSON.stringify({ type: "done" })}\n\n`
+                  `event: done\ndata: ${JSON.stringify({ type: "done" })}\n\n`
                 )
               );
             }
@@ -528,6 +555,14 @@ export class AgentDurableObject extends DurableObject<Env> {
     } catch (err) {
       console.error("Stream processing error:", err);
     }
+  }
+
+  /**
+   * Clear all chat messages for this DO instance.
+   */
+  async clearChatHistory(agentId: string): Promise<void> {
+    await this.ensureAgentId(agentId);
+    this.ctx.storage.sql.exec(`DELETE FROM chat_messages`);
   }
 
   /**
@@ -570,7 +605,7 @@ export class AgentDurableObject extends DurableObject<Env> {
       start(controller) {
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "error", text: message })}\n\n`
+            `event: error\ndata: ${JSON.stringify({ type: "error", text: message })}\n\n`
           )
         );
         controller.close();
@@ -689,7 +724,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     config: AgentDefinition,
     asOf?: string
   ): Promise<AgentReport | null> {
-    const eventLimit = reportConfig.cadence === "weekly" ? 5000 : 2000;
+    const eventLimit = 2000;
     const anchorDay = new Date(
       asOf ? asOf + "T23:59:59-06:00" : Date.now()
     ).getUTCDay();

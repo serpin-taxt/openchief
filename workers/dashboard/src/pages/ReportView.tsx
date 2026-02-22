@@ -11,22 +11,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HealthBadge } from "@/components/HealthBadge";
 
 const severityStyles: Record<string, string> = {
-  info: "border-l-blue-500 bg-blue-50/50",
-  warning: "border-l-amber-500 bg-amber-50/50",
-  critical: "border-l-red-500 bg-red-50/50",
+  info: "border-l-blue-500",
+  warning: "border-l-amber-500",
+  critical: "border-l-red-500",
 };
 
 const severityBadge: Record<string, string> = {
-  info: "bg-blue-100 text-blue-800",
-  warning: "bg-amber-100 text-amber-800",
-  critical: "bg-red-100 text-red-800",
+  info: "bg-blue-500/15 text-blue-400 border border-blue-500/30",
+  warning: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+  critical: "bg-red-500/15 text-red-400 border border-red-500/30",
 };
 
 const priorityStyles: Record<string, string> = {
-  low: "bg-slate-100 text-slate-700",
-  medium: "bg-blue-100 text-blue-700",
-  high: "bg-amber-100 text-amber-800",
-  critical: "bg-red-100 text-red-800",
+  low: "bg-muted text-muted-foreground border border-border",
+  medium: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+  high: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+  critical: "bg-red-500/15 text-red-400 border border-red-500/30",
 };
 
 export function ReportView() {
@@ -130,7 +130,7 @@ export function ReportView() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="prose prose-sm max-w-none">
+              <div className="prose prose-sm prose-invert max-w-none prose-p:text-muted-foreground prose-li:text-muted-foreground prose-strong:text-foreground prose-a:text-primary prose-headings:text-foreground">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {section.body}
                 </ReactMarkdown>

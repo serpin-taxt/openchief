@@ -6,16 +6,54 @@ import { api, type ConnectionStatus } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { HealthBadge } from "@/components/HealthBadge";
 import { SourceIcon } from "@/components/SourceIcon";
 
-interface AgentWithReport extends AgentDefinition {
-  latestReport?: AgentReport | null;
+interface AgentWithReports extends AgentDefinition {
+  recentReports: AgentReport[];
   avatarUrl?: string | null;
 }
 
+/** Get today and yesterday date strings in YYYY-MM-DD (local time). */
+function todayYesterday(): { today: string; yesterday: string } {
+  const now = new Date();
+  const today = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  const yesterday = y.toLocaleDateString("en-CA");
+  return { today, yesterday };
+}
+
+/** Find the first daily report whose createdAt falls on the given local date. */
+function reportForDate(reports: AgentReport[], date: string): AgentReport | undefined {
+  return reports.find((r) => {
+    // Only match daily reports (skip weekly) for today/yesterday cards
+    if (r.reportType?.includes("weekly")) return false;
+    // Compare in local time so the card matches what the user sees
+    const local = new Date(r.createdAt).toLocaleDateString("en-CA");
+    return local === date;
+  });
+}
+
+const healthDotColor: Record<string, string> = {
+  green: "bg-emerald-500",
+  yellow: "bg-amber-500",
+  red: "bg-red-500",
+};
+
+const healthBorder: Record<string, string> = {
+  green: "hover:border-emerald-500/60",
+  yellow: "hover:border-amber-500/60",
+  red: "hover:border-red-500/60",
+};
+
+const healthGradient: Record<string, string> = {
+  green: "from-emerald-500/[0.125] from-0% to-transparent to-50%",
+  yellow: "from-amber-500/[0.125] from-0% to-transparent to-50%",
+  red: "from-red-500/[0.125] from-0% to-transparent to-50%",
+};
+
 export function Home() {
-  const [agents, setAgents] = useState<AgentWithReport[]>([]);
+  const [agents, setAgents] = useState<AgentWithReports[]>([]);
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,16 +65,16 @@ export function Home() {
           api.get<ConnectionStatus[]>("connections"),
         ]);
 
-        // Fetch latest report for each agent in parallel
+        // Fetch recent reports for each agent (enough to cover today + yesterday)
         const withReports = await Promise.all(
           agentList.map(async (agent) => {
             try {
-              const report = await api.get<AgentReport>(
-                `agents/${agent.id}/reports/latest`,
+              const reports = await api.get<AgentReport[]>(
+                `agents/${agent.id}/reports`,
               );
-              return { ...agent, latestReport: report };
+              return { ...agent, recentReports: reports.slice(0, 20) };
             } catch {
-              return { ...agent, latestReport: null };
+              return { ...agent, recentReports: [] };
             }
           }),
         );
@@ -107,56 +145,63 @@ export function Home() {
   );
 }
 
-function AgentCard({ agent }: { agent: AgentWithReport }) {
-  const report = agent.latestReport;
-  const healthSignal = report?.content?.healthSignal ?? null;
+function AgentCard({ agent }: { agent: AgentWithReports }) {
+  const { today, yesterday } = todayYesterday();
+  const todayReport = reportForDate(agent.recentReports, today);
+  const yesterdayReport = reportForDate(agent.recentReports, yesterday);
+  const latestReport = agent.recentReports[0] ?? null;
+  const healthSignal = latestReport?.content?.healthSignal ?? null;
+  const dotColor = healthSignal ? (healthDotColor[healthSignal] ?? "bg-muted-foreground/50") : "bg-muted-foreground/30";
 
   return (
-    <Link to={`/modules/${agent.id}`} className="group">
-      <Card className="relative h-full overflow-hidden transition-shadow hover:shadow-md">
+    <Link to={`/modules/${agent.id}`}>
+      <Card className={cn("relative h-full overflow-hidden transition-all hover:shadow-md", healthSignal ? healthBorder[healthSignal] : "")}>
         {agent.avatarUrl && (
           <div className="absolute inset-0 pointer-events-none">
             <img
               src={agent.avatarUrl}
               alt=""
-              className="h-full w-full object-cover opacity-30"
+              className="h-full w-full object-cover opacity-30 grayscale"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-card/90 from-10% via-card/50 to-card/25" />
+            <div className={cn("absolute inset-0 bg-gradient-to-t", healthSignal ? (healthGradient[healthSignal] ?? "from-card/90 from-10% via-card/60 to-card/30") : "from-card/90 from-10% via-card/60 to-card/30")} />
           </div>
         )}
-        <CardHeader className="relative pb-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-base">{agent.name}</CardTitle>
-              {agent.visibility === "exec" && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-amber-500/40 bg-amber-500/15 text-amber-400">
-                  Exec
-                </Badge>
-              )}
-            </div>
-            {healthSignal && <HealthBadge signal={healthSignal} />}
+        <CardHeader className="relative pb-2">
+          <div className="flex items-center gap-2">
+            <span className={cn("h-2 w-2 shrink-0 rounded-full", dotColor)} />
+            <CardTitle className="text-base">{agent.name}</CardTitle>
+            {agent.visibility === "exec" && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-amber-500/40 bg-amber-500/15 text-amber-400">
+                Exec
+              </Badge>
+            )}
           </div>
         </CardHeader>
-        <CardContent className="relative">
-          <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
-            {agent.description}
-          </p>
-          {report?.content?.headline ? (
-            <p className="line-clamp-2 text-sm font-medium">
-              {report.content.headline}
-            </p>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              No reports yet
-            </p>
-          )}
-          <div className="mt-3 flex items-center gap-1 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-            View details
-            <ArrowRight className="h-3 w-3" />
-          </div>
+        <CardContent className="relative space-y-2.5">
+          <ReportLine label="Today" report={todayReport} />
+          <ReportLine label="Yesterday" report={yesterdayReport} />
         </CardContent>
       </Card>
     </Link>
+  );
+}
+
+function ReportLine({ label, report }: { label: string; report?: AgentReport }) {
+  return (
+    <div>
+      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      {report?.content?.headline ? (
+        <p className="mt-0.5 line-clamp-2 text-sm leading-snug">
+          {report.content.headline}
+        </p>
+      ) : (
+        <p className="mt-0.5 text-sm italic text-muted-foreground/60">
+          No report
+        </p>
+      )}
+    </div>
   );
 }
 

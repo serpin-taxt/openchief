@@ -25,6 +25,8 @@ interface Env {
   CF_ACCESS_TEAM_DOMAIN?: string;
   /** When "true", the dashboard is read-only (demo mode). Write endpoints return 403. */
   DEMO_MODE?: string;
+  /** Organization name for branding (set via wrangler vars from openchief.config.ts) */
+  ORG_NAME?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,12 +530,12 @@ export default {
           if (!isChatRequest) {
             return errorJson("This is a read-only demo instance", 403);
           }
-          // Rate-limit chat in demo mode: 10 messages per IP per hour
+          // Rate-limit chat in demo mode: 50 messages per IP per hour
           const ip = request.headers.get("cf-connecting-ip") || "unknown";
           const rateLimitKey = `demo:chat:${ip}`;
           const current = parseInt(await env.KV.get(rateLimitKey) || "0", 10);
-          if (current >= 10) {
-            return errorJson("Demo chat limit reached (10 messages/hour). Deploy your own instance for unlimited access!", 429);
+          if (current >= 50) {
+            return errorJson("Demo chat limit reached (50 messages/hour). Deploy your own instance for unlimited access!", 429);
           }
           await env.KV.put(rateLimitKey, String(current + 1), { expirationTtl: 3600 });
         }
@@ -813,6 +815,7 @@ function handleLogout(): Response {
 async function handleSessionCheck(request: Request, env: Env): Promise<Response> {
   const provider = env.AUTH_PROVIDER || "none";
   const demoMode = env.DEMO_MODE === "true";
+  const orgName = env.ORG_NAME || null;
 
   if (provider === "none") {
     // In demo mode with ADMIN_PASSWORD set, check for admin session
@@ -824,7 +827,7 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
         isAdmin = !!(await verifySessionToken(token, env.ADMIN_PASSWORD));
       }
     }
-    return json({ authenticated: true, provider: "none", demoMode, isAdmin });
+    return json({ authenticated: true, provider: "none", demoMode, isAdmin, orgName });
   }
 
   if (provider === "cloudflare-access") {
@@ -835,6 +838,7 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
       email: email || null,
       teamDomain: env.CF_ACCESS_TEAM_DOMAIN || null,
       demoMode,
+      orgName,
     });
   }
 
@@ -844,13 +848,13 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
     if (token) {
       const email = await verifySessionToken(token, env.ADMIN_PASSWORD);
       if (email) {
-        return json({ authenticated: true, provider: "password", email, demoMode });
+        return json({ authenticated: true, provider: "password", email, demoMode, orgName });
       }
     }
-    return json({ authenticated: false, provider: "password", demoMode });
+    return json({ authenticated: false, provider: "password", demoMode, orgName });
   }
 
-  return json({ authenticated: true, provider: "none", demoMode });
+  return json({ authenticated: true, provider: "none", demoMode, orgName });
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,6 +1110,12 @@ async function handleGetAvatar(
   agentId: string,
   ctx: ExecutionContext
 ): Promise<Response> {
+  // Try CF edge cache first (keyed on full URL including ?v= param)
+  const cache = caches.default;
+  const cacheKey = new Request(request.url, { method: "GET" });
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
   const { value, metadata } = await env.KV.getWithMetadata<{ contentType: string }>(
     `avatar:${agentId}`,
     { type: "arrayBuffer" }
@@ -1115,12 +1125,17 @@ async function handleGetAvatar(
     return errorJson("No avatar found", 404);
   }
 
-  return new Response(value as ArrayBuffer, {
+  const response = new Response(value as ArrayBuffer, {
     headers: {
       "Content-Type": metadata?.contentType || "image/png",
-      "Cache-Control": "no-store",
+      "Cache-Control": "public, max-age=31536000, immutable",
     },
   });
+
+  // Store in edge cache (non-blocking)
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+
+  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,18 +1330,29 @@ async function handleChat(
     // graceful fallback
   }
 
-  const body = await request.text();
+  // Parse the frontend payload and transform for the runtime
+  const rawBody = (await request.json()) as { messages?: { role: string; content: string }[]; message?: string };
+
+  // The frontend sends { messages: [...] } but the runtime expects { message: string }
+  let message: string;
+  if (rawBody.message) {
+    message = rawBody.message;
+  } else if (rawBody.messages && rawBody.messages.length > 0) {
+    // Extract the last user message from the conversation array
+    const lastUserMsg = [...rawBody.messages].reverse().find((m) => m.role === "user");
+    message = lastUserMsg?.content || "";
+  } else {
+    return errorJson("message is required", 400);
+  }
 
   // Proxy to AGENT_RUNTIME with SSE streaming
-  const runtimeUrl = `https://openchief-runtime/agents/${agentId}/chat`;
+  const runtimeUrl = `https://openchief-runtime/chat/${agentId}`;
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User-Email": userEmail,
-      "X-User-Name": userName,
     },
-    body,
+    body: JSON.stringify({ message, userEmail, userName }),
   });
 
   // Stream the SSE response through
@@ -1349,7 +1375,7 @@ async function handleChatHistory(
   agentId: string
 ): Promise<Response> {
   const userEmail = await getUserEmail(request, env);
-  const runtimeUrl = `https://openchief-runtime/agents/${agentId}/chat/history?userEmail=${encodeURIComponent(userEmail)}`;
+  const runtimeUrl = `https://openchief-runtime/chat/${agentId}/history?email=${encodeURIComponent(userEmail)}`;
 
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "GET",
@@ -1421,7 +1447,9 @@ async function handleTrigger(
   agentId: string,
   reportType: string
 ): Promise<Response> {
-  const runtimeUrl = `https://openchief-runtime/trigger/${agentId}/${reportType}`;
+  const reqUrl = new URL(request.url);
+  const asOf = reqUrl.searchParams.get("asOf");
+  const runtimeUrl = `https://openchief-runtime/trigger/${agentId}/${reportType}${asOf ? `?asOf=${encodeURIComponent(asOf)}` : ""}`;
 
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "POST",

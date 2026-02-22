@@ -7,6 +7,8 @@ import {
 } from "react";
 import { useParams } from "react-router-dom";
 import { X, Send, Loader2, MessageCircle, Wrench } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api, parseSSEStream, type ChatMessage } from "@/lib/api";
@@ -104,6 +106,9 @@ export function ChatSidebar() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Track how many messages came from history so we only animate new ones
+  const historyCountRef = useRef(0);
+
   // ---------------------------------------------------------------------------
   // Load agent definition and chat history when agent changes
   // ---------------------------------------------------------------------------
@@ -111,6 +116,7 @@ export function ChatSidebar() {
     setMessages([]);
     setInput("");
     setCurrentToolStatus(null);
+    historyCountRef.current = 0;
 
     if (agentId) {
       api
@@ -122,16 +128,16 @@ export function ChatSidebar() {
       api
         .get<ChatMessage[]>(`agents/${agentId}/chat/history`)
         .then((history) => {
-          setMessages(
-            history.map((m) => {
-              const { cleanText, updates } = parseConfigUpdates(m.content);
-              return {
-                ...m,
-                content: cleanText,
-                configUpdates: updates.length > 0 ? updates : undefined,
-              };
-            }),
-          );
+          const mapped = history.map((m) => {
+            const { cleanText, updates } = parseConfigUpdates(m.content);
+            return {
+              ...m,
+              content: cleanText,
+              configUpdates: updates.length > 0 ? updates : undefined,
+            };
+          });
+          historyCountRef.current = mapped.length;
+          setMessages(mapped);
         })
         .catch(() => {});
     } else {
@@ -139,17 +145,26 @@ export function ChatSidebar() {
     }
   }, [agentId]);
 
-  // Auto-scroll
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, currentToolStatus]);
+  // Auto-scroll: instant on history load / open, smooth during streaming
+  const scrollToBottom = useCallback((instant?: boolean) => {
+    bottomRef.current?.scrollIntoView({
+      behavior: instant ? "instant" : "smooth",
+    });
+  }, []);
 
-  // Focus input when opened
+  // Scroll when messages change — instant unless actively streaming
+  useEffect(() => {
+    scrollToBottom(!streaming);
+  }, [messages, currentToolStatus, streaming, scrollToBottom]);
+
+  // Instant scroll + focus when chat opens
   useEffect(() => {
     if (open) {
+      // Use rAF to ensure DOM has rendered the message list
+      requestAnimationFrame(() => scrollToBottom(true));
       inputRef.current?.focus();
     }
-  }, [open]);
+  }, [open, scrollToBottom]);
 
   // Auto-resize textarea
   const handleTextareaChange = useCallback(
@@ -163,8 +178,129 @@ export function ChatSidebar() {
   );
 
   // ---------------------------------------------------------------------------
-  // Send message with SSE streaming
+  // Send message with SSE streaming (with automatic retry)
   // ---------------------------------------------------------------------------
+
+  /** Execute a single chat request and process the SSE stream. */
+  const executeChatRequest = useCallback(
+    async (
+      chatAgentId: string,
+      allMessages: DisplayMessage[],
+    ): Promise<boolean> => {
+      const res = await fetch(`/api/agents/${chatAgentId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: allMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        // Try to extract the server error message
+        let serverMsg = `Chat request failed (${res.status})`;
+        try {
+          const errBody = await res.json() as { error?: string };
+          if (errBody.error) serverMsg = errBody.error;
+        } catch { /* ignore parse errors */ }
+
+        const err = new Error(serverMsg);
+        // Mark non-retryable errors so the retry loop can skip them
+        (err as Error & { noRetry?: boolean }).noRetry =
+          res.status === 429 || res.status === 403 || res.status === 400;
+        throw err;
+      }
+
+      let accumulated = "";
+      let gotContent = false;
+
+      for await (const evt of parseSSEStream(res)) {
+        switch (evt.event) {
+          case "delta": {
+            try {
+              const parsed = JSON.parse(evt.data);
+              const token =
+                parsed.delta?.text ??
+                parsed.choices?.[0]?.delta?.content ??
+                parsed.content ??
+                parsed.text ??
+                "";
+              if (token) {
+                gotContent = true;
+                accumulated += token;
+                const { cleanText, updates } =
+                  parseConfigUpdates(accumulated);
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    role: "assistant",
+                    content: cleanText,
+                    configUpdates:
+                      updates.length > 0 ? updates : undefined,
+                  };
+                  return updated;
+                });
+              }
+            } catch {
+              // Non-JSON delta, treat as raw text
+              gotContent = true;
+              accumulated += evt.data;
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "assistant",
+                  content: accumulated,
+                };
+                return updated;
+              });
+            }
+            break;
+          }
+
+          case "tool_status": {
+            try {
+              const status = JSON.parse(evt.data) as ToolStatus;
+              setCurrentToolStatus(status);
+              if (status.status === "complete" || status.status === "error") {
+                setTimeout(() => setCurrentToolStatus(null), 1500);
+              }
+            } catch {
+              // Ignore malformed tool status
+            }
+            break;
+          }
+
+          case "done": {
+            setCurrentToolStatus(null);
+            break;
+          }
+
+          case "error": {
+            // If we already have content, show it; otherwise mark as failed
+            if (!accumulated) throw new Error("Server returned error event");
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: accumulated,
+              };
+              return updated;
+            });
+            break;
+          }
+
+          default:
+            break;
+        }
+      }
+
+      return gotContent;
+    },
+    [],
+  );
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || streaming || !agentId) return;
@@ -184,114 +320,67 @@ export function ChatSidebar() {
     const assistantMsg: DisplayMessage = { role: "assistant", content: "" };
     setMessages((prev) => [...prev, assistantMsg]);
 
-    try {
-      const res = await fetch(`/api/agents/${agentId}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-      });
+    const allMessages = [...messages, userMsg];
+    const MAX_RETRIES = 1;
 
-      if (!res.ok) throw new Error("Chat request failed");
-
-      let accumulated = "";
-
-      for await (const evt of parseSSEStream(res)) {
-        switch (evt.event) {
-          case "delta": {
-            try {
-              const parsed = JSON.parse(evt.data);
-              const token =
-                parsed.delta?.text ??
-                parsed.choices?.[0]?.delta?.content ??
-                parsed.content ??
-                parsed.text ??
-                "";
-              if (token) {
-                accumulated += token;
-                const { cleanText, updates } =
-                  parseConfigUpdates(accumulated);
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: "assistant",
-                    content: cleanText,
-                    configUpdates:
-                      updates.length > 0 ? updates : undefined,
-                  };
-                  return updated;
-                });
-              }
-            } catch {
-              // Non-JSON delta, treat as raw text
-              accumulated += evt.data;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: accumulated,
-                };
-                return updated;
-              });
-            }
-            break;
-          }
-
-          case "tool_status": {
-            try {
-              const status = JSON.parse(evt.data) as ToolStatus;
-              setCurrentToolStatus(status);
-              if (status.status === "complete" || status.status === "error") {
-                // Clear tool status after a short delay
-                setTimeout(() => setCurrentToolStatus(null), 1500);
-              }
-            } catch {
-              // Ignore malformed tool status
-            }
-            break;
-          }
-
-          case "done": {
-            setCurrentToolStatus(null);
-            break;
-          }
-
-          case "error": {
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                role: "assistant",
-                content:
-                  accumulated || "Something went wrong. Please try again.",
-              };
-              return updated;
-            });
-            break;
-          }
-
-          default:
-            break;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Reset assistant placeholder for retry
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: "",
+            };
+            return updated;
+          });
+          setCurrentToolStatus(null);
+          // Brief delay before retry
+          await new Promise((r) => setTimeout(r, 500));
         }
+
+        const gotContent = await executeChatRequest(agentId, allMessages);
+        if (gotContent) break; // Success — exit retry loop
+
+        // No content received — treat as failure and retry
+        if (attempt < MAX_RETRIES) {
+          console.warn(`Chat returned no content, retrying (attempt ${attempt + 1})...`);
+          continue;
+        }
+
+        // Final attempt with no content
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: "Something went wrong. Please try again.",
+          };
+          return updated;
+        });
+      } catch (err) {
+        console.error(`Chat error (attempt ${attempt}):`, err);
+        const noRetry = (err as Error & { noRetry?: boolean }).noRetry;
+        if (!noRetry && attempt < MAX_RETRIES) {
+          console.warn("Retrying chat request...");
+          continue;
+        }
+        // Final attempt or non-retryable error — show the actual message
+        const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: errorMsg,
+          };
+          return updated;
+        });
       }
-    } catch (err) {
-      console.error("Chat error:", err);
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: "Something went wrong. Please try again.",
-        };
-        return updated;
-      });
-    } finally {
-      setStreaming(false);
-      setCurrentToolStatus(null);
     }
-  }, [input, streaming, agentId, messages]);
+
+    setStreaming(false);
+    setCurrentToolStatus(null);
+  }, [input, streaming, agentId, messages, executeChatRequest]);
 
   // ---------------------------------------------------------------------------
   // Apply config proposal
@@ -405,6 +494,7 @@ export function ChatSidebar() {
                 key={i}
                 className={cn(
                   "flex",
+                  i >= historyCountRef.current && "animate-chat-bubble",
                   msg.role === "user" ? "justify-end" : "justify-start",
                 )}
               >
@@ -417,14 +507,26 @@ export function ChatSidebar() {
                         : "bg-muted",
                     )}
                   >
-                    <div className="whitespace-pre-wrap break-words">
-                      {msg.content}
-                    </div>
+                    {msg.role === "user" ? (
+                      <div className="whitespace-pre-wrap break-words">
+                        {msg.content}
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm prose-invert max-w-none break-words prose-p:my-1 prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-a:text-primary prose-headings:text-foreground prose-headings:mt-3 prose-headings:mb-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-hr:my-2 prose-pre:my-1 prose-pre:bg-background/50 prose-code:text-foreground/80">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
                     {msg.role === "assistant" &&
                       !msg.content &&
                       streaming &&
                       i === messages.length - 1 && (
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+                          <span className="animate-[bounce_1.4s_ease-in-out_infinite]">.</span>
+                          <span className="animate-[bounce_1.4s_ease-in-out_0.2s_infinite]">.</span>
+                          <span className="animate-[bounce_1.4s_ease-in-out_0.4s_infinite]">.</span>
+                        </span>
                       )}
                   </div>
 
@@ -466,7 +568,7 @@ export function ChatSidebar() {
 
             {/* Streaming tool status indicator */}
             {currentToolStatus && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex animate-chat-bubble items-center gap-2 text-xs text-muted-foreground">
                 {currentToolStatus.status === "running" ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (

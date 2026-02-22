@@ -26,6 +26,8 @@ interface AuthState {
   demoMode: boolean;
   /** Is the user logged in as admin (demo mode)? */
   isAdmin: boolean;
+  /** Organization name from server config */
+  orgName: string | null;
 }
 
 interface AuthContextType extends AuthState {
@@ -51,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     teamDomain: null,
     demoMode: false,
     isAdmin: false,
+    orgName: null,
   });
 
   // Check session on mount
@@ -64,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           teamDomain?: string;
           demoMode?: boolean;
           isAdmin?: boolean;
+          orgName?: string | null;
         }) => {
           setState({
             checked: true,
@@ -72,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             teamDomain: data.teamDomain || null,
             demoMode: data.demoMode || false,
             isAdmin: data.isAdmin || false,
+            orgName: data.orgName || null,
           });
         },
       )
@@ -84,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           teamDomain: null,
           demoMode: false,
           isAdmin: false,
+          orgName: null,
         });
       });
   }, []);

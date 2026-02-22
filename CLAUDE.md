@@ -24,6 +24,7 @@ openchief/
 │   ├── runtime/              # Agent Durable Object runtime (report generation + chat)
 │   ├── router/               # Event router (queue consumer → D1 persistence)
 │   ├── dashboard/            # React SPA + API worker (all UI + management endpoints)
+│   ├── demo-engine/          # Synthetic event generator for demo mode (Serpin's Burger Shack)
 │   └── connectors/           # One Worker per data source (14 connectors, all implemented)
 │       ├── github/           # Webhook + polling
 │       ├── slack/            # Webhook + polling + backfill + identity sync
