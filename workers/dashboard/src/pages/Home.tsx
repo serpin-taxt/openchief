@@ -62,7 +62,7 @@ export function Home() {
       try {
         const [agentList, connList] = await Promise.all([
           api.get<AgentDefinition[]>("agents"),
-          api.get<ConnectionStatus[]>("connections"),
+          api.get<ConnectionStatus[]>("connections").catch(() => [] as ConnectionStatus[]),
         ]);
 
         // Fetch recent reports for each agent (enough to cover today + yesterday)
