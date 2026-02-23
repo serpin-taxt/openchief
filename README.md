@@ -145,6 +145,15 @@ Any private Slack channel the bot is invited to is automatically treated as exec
 
 To make any agent exec-level, add `"visibility": "exec"` to its JSON definition and re-seed.
 
+### Team & Identity Management
+
+The **Team page** (`/team`) shows all people and bots discovered across your connected services — GitHub, Slack, Discord, Figma, etc. — unified into a single identity record per person. Identities are synced automatically when connectors poll, or on-demand via the "Sync Humans" button on each connector's detail page.
+
+**Superadmin capabilities** (set via `SUPERADMIN_EMAIL` in config):
+- **Merge** duplicate identities (select two → merge into one)
+- **Hide** people who have left or are irrelevant (soft-hide, data preserved)
+- **Promote/demote** exec roles for access to private channel data
+
 ### Create Your Own Agent
 
 Agents are **data, not code** — just JSON files. Add one to `agents/` and run `pnpm seed`:

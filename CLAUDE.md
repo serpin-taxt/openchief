@@ -175,6 +175,60 @@ Private Slack channels are treated as exec-level content. Events from private ch
 
 See `agents/CLAUDE.md` for full setup instructions.
 
+## Identity Management
+
+The Team page (`/team`) shows all identity records — cross-platform user profiles that link GitHub, Slack, Discord, Figma, and other accounts into a single person. Superadmins can merge duplicate identities, promote/demote exec roles, and hide irrelevant entries.
+
+### Identity Sync (Connectors → D1)
+
+Each connector syncs user profiles into the `identity_mappings` D1 table using a 3-tier matching strategy:
+
+1. **Match by platform username** (e.g., `github_username`) — update existing record
+2. **Match by email** — link the new platform account to an existing identity
+3. **No match** — insert a new identity record
+
+Name preservation: both connectors use `COALESCE(?, real_name)` so a Slack-sourced full name is never overwritten by a GitHub username fallback. The `display_name` column is only set when the source has a real display name (not a username).
+
+- **Slack connector** (`workers/connectors/slack/src/identity-sync.ts`): Syncs all workspace members. Slack is typically the richest source of real names and avatars.
+- **GitHub connector** (`workers/connectors/github/src/identity-sync.ts`): Discovers users via org members endpoint (fast) or falls back to repo contributors. Skips bot accounts.
+
+Both connectors expose a `?task=identity` mode for on-demand sync from the dashboard's "Sync Humans" button on each connector's detail page.
+
+### Display Name Logic
+
+The Team page picks the best display name using `bestName()`: it returns the longer of `displayName` and `realName`, since the longer string is more likely to be the full name (e.g., "Sean Waters" over "Sean").
+
+### Superadmin Role
+
+The superadmin is determined by the `SUPERADMIN_EMAIL` wrangler var. The email matching is case-insensitive. Superadmins can:
+
+- **Promote/demote exec** — toggle a person's role between `exec` and none
+- **Hide/show identities** — toggle `is_active` to remove clutter from the team page (hidden identities still exist in D1 and retain all cross-platform links)
+- **Merge identities** — combine two identity records into one (select two checkboxes, first selected = primary)
+- **Manage connections** — all `/api/connections/*` routes are superadmin-only
+
+### Identity API Endpoints
+
+| Method | Route | Auth | Description |
+|--------|-------|------|-------------|
+| `GET` | `/api/identities` | Any authenticated | List all identities (returns `role` with superadmin resolved by email) |
+| `POST` | `/api/identities/merge` | Superadmin | Merge two identities (`{ primaryId, secondaryId }`) |
+| `PUT` | `/api/identities/:id/role` | Superadmin | Set role (`{ role: "exec" \| null }`) |
+| `PUT` | `/api/identities/:id/active` | Superadmin | Hide/show identity (`{ isActive: boolean }`) |
+
+### Hiding Identities
+
+Hidden identities (`is_active = 0`) are filtered out of the Team page by default. Superadmins see a "Show hidden (N)" toggle that reveals them with a "Hidden" badge and an eye icon to unhide. Hiding is soft — the identity record remains in D1 and retains all cross-platform links, event attribution, and merge history.
+
+### Implementation Files
+
+| File | Role |
+|------|------|
+| `workers/dashboard/worker/index.ts` | Identity API endpoints (list, merge, role, active) |
+| `workers/dashboard/src/pages/Team.tsx` | Team page UI (table, filters, merge, hide/show, bestName) |
+| `workers/connectors/github/src/identity-sync.ts` | GitHub → D1 identity sync (org members or repo contributors) |
+| `workers/connectors/slack/src/identity-sync.ts` | Slack → D1 identity sync (workspace members) |
+
 ## Configuration System
 
 - `openchief.example.config.ts` — Template with all required fields
@@ -234,10 +288,11 @@ Three auth modes, configured via `auth.provider` in `openchief.config.ts`:
 | `AUTH_PROVIDER` | var | All | `"none"`, `"cloudflare-access"`, or `"password"` |
 | `ADMIN_PASSWORD` | secret | password | The admin password (set via `wrangler secret put`) |
 | `CF_ACCESS_TEAM_DOMAIN` | var | cloudflare-access | Team domain for login redirect (e.g. `your-team.cloudflareaccess.com`) |
+| `SUPERADMIN_EMAIL` | var | All | Email of the superadmin user (case-insensitive). Grants identity management, connection management, and role promotion capabilities. |
 
 ### Identity Resolution
 
-Regardless of auth mode, user email is resolved via the `identity_mappings` D1 table for display names, avatars, team, and role. Falls back to email prefix if no identity found.
+Regardless of auth mode, user email is resolved via the `identity_mappings` D1 table for display names, avatars, team, and role. Falls back to email prefix if no identity found. The superadmin role is resolved by matching the user's email against the `SUPERADMIN_EMAIL` wrangler var. See "Identity Management" section for full details on identity sync, merge, and role management.
 
 ## Database (D1)
 
@@ -247,7 +302,7 @@ Regardless of auth mode, user email is resolved via the `identity_mappings` D1 t
 - `agent_subscriptions` — Source + event type patterns per agent
 - `reports` — Generated reports with content JSON
 - `agent_revisions` — Change history for agent configs
-- `identity_mappings` — Cross-platform user identity (GitHub, Slack, Discord, Figma, Jira, Notion)
+- `identity_mappings` — Cross-platform user identity (GitHub, Slack, Discord, Figma, Jira, Notion). Key columns: `role` (superadmin/exec/null), `is_active` (1/0 for hide/show), `is_bot`, `team`
 - `model_settings` — Per-job-type AI model configuration
 
 ## Caching (KV)
