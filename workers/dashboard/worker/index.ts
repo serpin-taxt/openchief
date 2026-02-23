@@ -113,6 +113,13 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
     fields: [
       { name: "FIGMA_TOKEN", label: "Personal Access Token", secret: true },
       { name: "FIGMA_PASSCODE", label: "Webhook Passcode", secret: true },
+      {
+        name: "FIGMA_TEAM_ID",
+        label: "Team ID",
+        secret: false,
+        placeholder: "From your Figma team URL",
+        description: "Find at figma.com/files/team/{TEAM_ID}/...",
+      },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
   },
@@ -444,8 +451,9 @@ async function getUserEmail(request: Request, env: Env): Promise<string> {
     return "unknown";
   }
 
-  // provider === "none"
-  return "unknown";
+  // provider === "none" — no login, so fall back to SUPERADMIN_EMAIL if set
+  // (if you're running without auth, you're presumably the admin)
+  return env.SUPERADMIN_EMAIL || "unknown";
 }
 
 type UserRole = "superadmin" | "exec" | null;
@@ -740,6 +748,14 @@ export default {
         return handleConnectionSync(request, env, source);
       }
 
+      // /api/connections/:source/projects  (list + save selected projects)
+      const connProjectsMatch = path.match(/^\/api\/connections\/([^/]+)\/projects$/);
+      if (connProjectsMatch) {
+        const source = decodeURIComponent(connProjectsMatch[1]);
+        if (method === "GET") return handleGetConnectionProjects(env, source);
+        if (method === "PUT") return handleUpdateConnectionProjects(request, env, source);
+      }
+
       // -----------------------------------------------------------------------
       // Identities
       // -----------------------------------------------------------------------
@@ -915,7 +931,10 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
         isAdmin = !!(await verifySessionToken(token, env.ADMIN_PASSWORD));
       }
     }
-    return json({ authenticated: true, provider: "none", demoMode, isAdmin, orgName });
+    // Resolve role so the sidebar can show exec agents and connections
+    const email = await getUserEmail(request, env);
+    const role = await getUserRole(email, env);
+    return json({ authenticated: true, provider: "none", demoMode, isAdmin, orgName, role });
   }
 
   if (provider === "cloudflare-access") {
@@ -1949,6 +1968,102 @@ async function handleConnectionSync(
       result = { raw: body };
     }
     return json({ ok: true, ...((result && typeof result === "object") ? result : { result }) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /api/connections/:source/projects — proxy to connector /projects
+// ---------------------------------------------------------------------------
+
+async function handleGetConnectionProjects(
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const resp = await binding.fetch("https://connector/projects", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    const body = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: body },
+        resp.status,
+      );
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+async function handleUpdateConnectionProjects(
+  request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await binding.fetch("https://connector/projects", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${adminSecret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    const respBody = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: respBody },
+        resp.status,
+      );
+    }
+    return new Response(respBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to reach connector";
     return json({ ok: false, error: msg }, 502);

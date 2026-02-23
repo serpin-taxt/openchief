@@ -16,6 +16,7 @@ interface Env {
   ADMIN_SECRET: string;
   FIGMA_CLIENT_ID: string;
   FIGMA_CLIENT_SECRET: string;
+  FIGMA_TEAM_ID?: string;
   KV: KVNamespace;
   DB: D1Database;
 }
@@ -59,6 +60,74 @@ export default {
         return jsonResponse({ ok: true, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Backfill failed";
+        return jsonResponse({ ok: false, error: msg }, 500);
+      }
+    }
+
+    // GET /projects — list available files and selected file keys (admin only)
+    if (url.pathname === "/projects" && request.method === "GET") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const teamId = env.FIGMA_TEAM_ID;
+        if (!teamId) {
+          return jsonResponse({
+            ok: false,
+            error: "Team ID not configured. Set FIGMA_TEAM_ID in the Configuration section.",
+          }, 400);
+        }
+        const token = await getFigmaToken(env);
+        // First get projects, then get files within each project
+        const teamProjects = await figmaApi<{ projects: FigmaProject[] }>(
+          `/v1/teams/${teamId}/projects`,
+          token,
+        );
+        const projects = teamProjects?.projects ?? [];
+        const allFiles: Array<{ key: string; name: string; projectId: string; projectName: string }> = [];
+        for (const project of projects) {
+          const projectFiles = await figmaApi<{ files: FigmaFile[] }>(
+            `/v1/projects/${project.id}/files`,
+            token,
+          );
+          if (projectFiles?.files) {
+            for (const f of projectFiles.files) {
+              allFiles.push({
+                key: f.key,
+                name: f.name,
+                projectId: project.id,
+                projectName: project.name,
+              });
+            }
+          }
+          await delay(300);
+        }
+        // Read selected file keys from KV
+        const selectedKeys = await getFileKeys(env);
+        return jsonResponse({ ok: true, teamId, files: allFiles, selected: selectedKeys });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to list files";
+        return jsonResponse({ ok: false, error: msg }, 500);
+      }
+    }
+
+    // PUT /projects — save selected file keys (admin only)
+    if (url.pathname === "/projects" && request.method === "PUT") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const body = await request.json() as { fileKeys: string[] };
+        if (!Array.isArray(body.fileKeys)) {
+          return jsonResponse({ ok: false, error: "fileKeys must be an array" }, 400);
+        }
+        // Save selected file keys — this is what getWatchedFiles() reads first
+        if (body.fileKeys.length > 0) {
+          await env.KV.put("figma:file_keys", JSON.stringify(body.fileKeys));
+        } else {
+          await env.KV.delete("figma:file_keys");
+        }
+        return jsonResponse({ ok: true, fileKeys: body.fileKeys });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to save file selection";
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }
@@ -180,6 +249,18 @@ async function handleWebhookEvent(
   env: Env
 ): Promise<void> {
   try {
+    // File filtering — skip events from files not in the watched list
+    const watchedKeys = await getFileKeys(env);
+    if (watchedKeys.length > 0 && payload.file_key) {
+      const keySet = new Set(watchedKeys);
+      if (!keySet.has(payload.file_key as string)) {
+        console.log(
+          `Skipping webhook for untracked file: ${payload.file_key} (${payload.event_type})`,
+        );
+        return;
+      }
+    }
+
     const events = normalizeWebhookEvent(payload as any);
 
     for (const event of events) {
@@ -509,6 +590,7 @@ async function runBackfill(
   };
 }
 
+
 async function getProjectIds(env: Env): Promise<string[]> {
   const raw = await env.KV.get("figma:project_ids");
   if (!raw) return [];
@@ -516,6 +598,16 @@ async function getProjectIds(env: Env): Promise<string[]> {
     return JSON.parse(raw) as string[];
   } catch {
     // If it's a comma-separated string
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+}
+
+async function getFileKeys(env: Env): Promise<string[]> {
+  const raw = await env.KV.get("figma:file_keys");
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as string[];
+  } catch {
     return raw.split(",").map((s) => s.trim()).filter(Boolean);
   }
 }
