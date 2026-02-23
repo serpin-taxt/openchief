@@ -28,6 +28,38 @@ function todayString(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Format an ISO date string as relative time from now.
+ * e.g. "3 hours 12 minutes", "Tomorrow at 2:00 PM", "Monday at 2:00 PM"
+ */
+function relativeTime(isoDate: string): string {
+  const target = new Date(isoDate);
+  const now = new Date();
+  const diffMs = target.getTime() - now.getTime();
+
+  if (diffMs <= 0) return "Now";
+
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+function formatExactTime(isoDate: string): string {
+  const d = new Date(isoDate);
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
 export function Jobs() {
   const [date, setDate] = useState(todayString);
   const [jobs, setJobs] = useState<JobStatus[]>([]);
@@ -203,6 +235,14 @@ export function Jobs() {
                           <span className="inline-flex items-center gap-1 text-sm text-emerald-700">
                             <CheckCircle2 className="h-3.5 w-3.5" />
                             Completed
+                          </span>
+                        ) : report.nextRunAt ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-sm text-muted-foreground cursor-default"
+                            title={formatExactTime(report.nextRunAt)}
+                          >
+                            <Clock className="h-3.5 w-3.5" />
+                            {relativeTime(report.nextRunAt)}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">

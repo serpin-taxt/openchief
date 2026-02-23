@@ -118,6 +118,11 @@ export function ChatSidebar() {
     setCurrentToolStatus(null);
     historyCountRef.current = 0;
 
+    // Close chat panel when navigating away from an agent page
+    if (!agentId) {
+      setOpen(false);
+    }
+
     if (agentId) {
       api
         .get<AgentDefinition>(`agents/${agentId}`)
@@ -447,8 +452,8 @@ export function ChatSidebar() {
 
   return (
     <>
-      {/* Floating toggle button */}
-      {!open && (
+      {/* Floating toggle button — only shown on individual agent pages */}
+      {!open && agentId && (
         <button
           onClick={() => setOpen(true)}
           className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105"

@@ -33,6 +33,10 @@
     {
       "binding": "CONNECTOR_SLACK",
       "service": "openchief-connector-slack"
+    },
+    {
+      "binding": "CONNECTOR_FIGMA",
+      "service": "openchief-connector-figma"
     }
   ],
   "vars": {

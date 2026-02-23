@@ -332,6 +332,38 @@ async function main() {
             );
           }
         }
+
+        // Set REPORT_TIME_UTC_HOUR for next-run display on the Jobs page
+        const reportHour = config.runtime?.reportTimeUtcHour;
+        if (reportHour !== undefined && reportHour !== null) {
+          if (content.includes('"REPORT_TIME_UTC_HOUR"')) {
+            content = content.replace(
+              /"REPORT_TIME_UTC_HOUR"\s*:\s*"[^"]*"/,
+              `"REPORT_TIME_UTC_HOUR": "${reportHour}"`
+            );
+          } else {
+            content = content.replace(
+              /("AUTH_PROVIDER"\s*:\s*"[^"]*")/,
+              `$1,\n    "REPORT_TIME_UTC_HOUR": "${reportHour}"`
+            );
+          }
+        }
+
+        // Set REPORT_TIMEZONE for display purposes
+        const reportTz = config.runtime?.reportTimezone;
+        if (reportTz) {
+          if (content.includes('"REPORT_TIMEZONE"')) {
+            content = content.replace(
+              /"REPORT_TIMEZONE"\s*:\s*"[^"]*"/,
+              `"REPORT_TIMEZONE": "${reportTz}"`
+            );
+          } else {
+            content = content.replace(
+              /("AUTH_PROVIDER"\s*:\s*"[^"]*")/,
+              `$1,\n    "REPORT_TIMEZONE": "${reportTz}"`
+            );
+          }
+        }
       }
     }
 

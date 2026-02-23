@@ -29,6 +29,10 @@ interface Env {
   ORG_NAME?: string;
   /** Superadmin email — this user gets full access (connections, exec agents, role management) */
   SUPERADMIN_EMAIL?: string;
+  /** UTC hour when daily reports are scheduled (e.g. "14" for 2pm UTC). Used for "next run" display. */
+  REPORT_TIME_UTC_HOUR?: string;
+  /** IANA timezone for report display (e.g. "America/Chicago"). */
+  REPORT_TIMEZONE?: string;
   /** Connector service bindings — one per enabled connector (e.g. CONNECTOR_SLACK, CONNECTOR_GITHUB) */
   [key: `CONNECTOR_${string}`]: Fetcher | undefined;
 }
@@ -2210,6 +2214,45 @@ async function handleJobsStatus(request: Request, env: Env): Promise<Response> {
     }
   }
 
+  // Compute next scheduled run time for pending jobs
+  const reportHour = parseInt(env.REPORT_TIME_UTC_HOUR || "14", 10);
+  const now = new Date();
+
+  function computeNextRunAt(cadence: string): string | null {
+    // Daily reports run Mon-Fri at reportHour:00 UTC
+    // Weekly reports run on Monday at reportHour:00 UTC
+    const target = new Date(now);
+    target.setUTCHours(reportHour, 0, 0, 0);
+
+    if (cadence === "daily") {
+      // If today's run time hasn't passed yet and it's a weekday, use today
+      const dow = target.getUTCDay(); // 0=Sun, 6=Sat
+      if (target > now && dow >= 1 && dow <= 5) {
+        return target.toISOString();
+      }
+      // Otherwise find next weekday
+      target.setUTCDate(target.getUTCDate() + 1);
+      while (target.getUTCDay() === 0 || target.getUTCDay() === 6) {
+        target.setUTCDate(target.getUTCDate() + 1);
+      }
+      return target.toISOString();
+    }
+
+    if (cadence === "weekly") {
+      // Next Monday at reportHour:00 UTC
+      const dow = target.getUTCDay();
+      if (dow === 1 && target > now) {
+        return target.toISOString(); // It's Monday and hasn't run yet
+      }
+      // Find next Monday
+      const daysUntilMonday = dow === 0 ? 1 : (8 - dow);
+      target.setUTCDate(target.getUTCDate() + daysUntilMonday);
+      return target.toISOString();
+    }
+
+    return null;
+  }
+
   const jobs = (agentRows || []).map((row) => {
     const config = JSON.parse(row.config) as AgentDefinition;
     const expectedReports = config.outputs.reports.map((r) => {
@@ -2224,6 +2267,7 @@ async function handleJobsStatus(request: Request, env: Env): Promise<Response> {
         headline: generated?.headline || null,
         completedAt: generated?.createdAt || null,
         eventCount: generated?.eventCount || null,
+        nextRunAt: generated ? null : computeNextRunAt(r.cadence),
       };
     });
 

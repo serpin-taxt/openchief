@@ -97,6 +97,7 @@ export interface JobStatus {
     headline: string | null;
     completedAt: string | null;
     eventCount: number | null;
+    nextRunAt: string | null;
   }>;
 }
 

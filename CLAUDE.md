@@ -29,7 +29,7 @@ openchief/
 │       ├── github/           # Webhook + polling
 │       ├── slack/            # Webhook + polling + backfill + identity sync
 │       ├── discord/          # Webhook (Ed25519) + polling
-│       ├── figma/            # OAuth + webhook + polling (versions, comments, activity)
+│       ├── figma/            # OAuth + webhook + polling (file updates, versions, comments, deletes, library publishes)
 │       ├── jira/             # Polling (issues, transitions, sprints)
 │       ├── jpd/              # Polling (Jira Product Discovery — ideas, insights)
 │       ├── notion/           # Polling (pages, databases, comments)

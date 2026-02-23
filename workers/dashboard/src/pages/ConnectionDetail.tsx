@@ -342,6 +342,52 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
     claudeCode:
       'You can automate the Slack App setup using Claude Code with browser automation. Use this prompt:\n\n"Create a new Slack App for OpenChief on my workspace at api.slack.com. Use the App Manifest approach — navigate to api.slack.com/apps, click Create New App → From an app manifest, select my workspace, and paste this manifest:"\n\n```json\n{\n  "display_information": {\n    "name": "OpenChief",\n    "description": "AI agents that passively watch your tools and produce reports",\n    "background_color": "#0a0a0a"\n  },\n  "features": {\n    "bot_user": {\n      "display_name": "OpenChief",\n      "always_online": true\n    }\n  },\n  "oauth_config": {\n    "scopes": {\n      "bot": [\n        "channels:history", "channels:join", "channels:read",\n        "groups:history", "groups:read", "reactions:read",\n        "team:read", "users:read", "users:read.email"\n      ]\n    }\n  },\n  "settings": {\n    "event_subscriptions": {\n      "request_url": "YOUR_SLACK_CONNECTOR_WORKER_URL/webhook",\n      "bot_events": [\n        "channel_archive", "channel_created", "channel_unarchive",\n        "member_joined_channel", "member_left_channel",\n        "message.channels", "message.groups",\n        "reaction_added", "reaction_removed", "team_join"\n      ]\n    },\n    "org_deploy_enabled": false,\n    "socket_mode_enabled": false,\n    "token_rotation_enabled": false\n  }\n}\n```\n\n"Then install the app to the workspace, copy the Bot Token and Signing Secret, and set the wrangler secrets (SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, ADMIN_SECRET) on the connector worker."',
   },
+  figma: {
+    manual: [
+      {
+        step: "Create a Figma App",
+        detail:
+          'Go to figma.com/developers/apps and click "Create a new app". Set the name (e.g. "OpenChief"), add a description, and upload a logo if desired.',
+      },
+      {
+        step: "Set the OAuth callback URL",
+        detail:
+          "In the app settings, set the Callback URL to your Figma connector worker URL + /oauth/callback (e.g. https://openchief-internal-connector-figma.trust-ethos.workers.dev/oauth/callback). This is used when authenticating via OAuth.",
+      },
+      {
+        step: "Set OAuth scopes",
+        detail:
+          "Under OAuth scopes, add: file_content:read, file_metadata:read, file_versions:read, file_comments:read, library_assets:read, library_content:read, team_library_content:read, file_dev_resources:read, projects:read, webhooks:read, webhooks:write.",
+      },
+      {
+        step: "Copy Client ID and Client Secret",
+        detail:
+          "Copy the Client ID and Client Secret from the app page. You will set these as wrangler secrets: FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET.",
+      },
+      {
+        step: "Generate a Personal Access Token (fallback)",
+        detail:
+          'Go to figma.com/developers/api#access-tokens and generate a new Personal Access Token with file:read and webhooks:write scopes. This is used as a fallback when OAuth is not completed.',
+      },
+      {
+        step: "Set a Webhook Passcode",
+        detail:
+          'Generate a random passcode (openssl rand -hex 20). This passcode validates incoming webhook payloads from Figma. You will set it as the FIGMA_PASSCODE secret and use it when registering webhooks.',
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Fill in: Personal Access Token, Webhook Passcode, and Admin Secret. Additionally, set FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET via wrangler secret put on the connector worker.",
+      },
+      {
+        step: "Initiate OAuth (recommended)",
+        detail:
+          'After deploying the connector and setting secrets, visit https://YOUR_CONNECTOR_URL/oauth/start?secret=YOUR_ADMIN_SECRET to start the OAuth flow. This grants team-level access and is preferred over personal tokens.',
+      },
+    ],
+    claudeCode:
+      'You can automate the Figma App setup using Claude Code with browser automation. Use this prompt:\n\n"Set up a Figma app for OpenChief. Navigate to figma.com/developers/apps and create a new app called \'OpenChief\'. Set the Callback URL to https://MY_FIGMA_CONNECTOR_WORKER_URL/oauth/callback. Add these OAuth scopes: file_content:read, file_metadata:read, file_versions:read, file_comments:read, library_assets:read, library_content:read, team_library_content:read, file_dev_resources:read, projects:read, webhooks:read, webhooks:write. Copy the Client ID and Client Secret. Then generate a Personal Access Token at figma.com/developers/api#access-tokens with file:read and webhooks:write scopes. Set the wrangler secrets on the connector worker: FIGMA_TOKEN (personal token), FIGMA_PASSCODE (random hex: openssl rand -hex 20), FIGMA_CLIENT_ID, FIGMA_CLIENT_SECRET, and ADMIN_SECRET. Finally, initiate the OAuth flow by visiting https://MY_FIGMA_CONNECTOR_WORKER_URL/oauth/start?secret=MY_ADMIN_SECRET."',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -362,17 +408,6 @@ function SetupGuideContent({ guide }: { guide: SetupGuideData }) {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1">
-        <button
-          onClick={() => setActiveTab("manual")}
-          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "manual"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <BookOpen className="h-3 w-3" />
-          Manual Setup
-        </button>
         {guide.claudeCode && (
           <button
             onClick={() => setActiveTab("claude")}
@@ -386,6 +421,17 @@ function SetupGuideContent({ guide }: { guide: SetupGuideData }) {
             Claude Code
           </button>
         )}
+        <button
+          onClick={() => setActiveTab("manual")}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "manual"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <BookOpen className="h-3 w-3" />
+          Manual Setup
+        </button>
       </div>
 
       {activeTab === "manual" ? (

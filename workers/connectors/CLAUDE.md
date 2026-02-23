@@ -203,14 +203,88 @@ Three concurrent tasks:
 
 ---
 
+### Figma Connector (`figma/`)
+
+**Full implementation** — OAuth + webhook + cron polling + deep backfill. Most sophisticated connector — tracks version history, autosave-level edits, comments, and library publishes.
+
+#### File Structure
+```
+src/
+├── index.ts              # Webhook handler + OAuth flow + cron + /poll + /backfill
+└── normalize.ts          # Figma webhook/API → OpenChiefEvent[]
+```
+
+#### Webhook Events Handled
+
+| Figma Event | Event Type(s) | Key Details |
+|-------------|---------------|-------------|
+| `FILE_UPDATE` | `file.edited` | fileKey, fileName (fires ~30 min after editing inactivity, no actor) |
+| `FILE_VERSION_UPDATE` | `file.version_updated` | fileKey, versionId, label, description, triggeredBy |
+| `FILE_COMMENT` (new) | `comment.created` | commentId, text, fileKey, fileName, userId, userHandle |
+| `FILE_COMMENT` (reply) | `comment.replied` | commentId, text, parentId, fileKey, fileName |
+| `FILE_DELETE` | `file.deleted` | fileKey, fileName, triggeredBy |
+| `LIBRARY_PUBLISH` | `library.published` | libraryName, created/modified/deleted components and styles |
+
+#### Polling-Only Events
+
+| Detection Method | Event Type | Key Details |
+|-----------------|------------|-------------|
+| `last_modified` change (no new version) | `file.edited` | Autosave detection via polling — editors inferred from recent version authors |
+
+#### Webhook Verification
+- Figma uses a **passcode** scheme (not HMAC) — each webhook payload contains a `passcode` field verified against `FIGMA_PASSCODE`
+- Non-blocking processing via `ctx.waitUntil()` for fast response
+
+#### Authentication
+- **Dual auth support**: OAuth (preferred) and Personal Access Token (fallback)
+- `getFigmaToken()` checks KV for OAuth token first (`figma:oauth_token`), falls back to `FIGMA_TOKEN` env secret
+- Auto-detects token type by prefix: `figu_*` → Bearer auth (OAuth), `figd_*` → X-Figma-Token header (PAT)
+- OAuth flow: `/oauth/start` → Figma authorize → `/oauth/callback` → token stored in KV with ~90-day TTL
+- 11 granular v2 OAuth scopes (file_content:read, file_metadata:read, file_versions:read, file_comments:read, library_assets:read, library_content:read, team_library_content:read, file_dev_resources:read, projects:read, webhooks:read, webhooks:write)
+
+#### File Discovery
+Two strategies for determining which files to monitor:
+1. **Explicit allowlist**: `figma:file_keys` KV key — JSON array of specific file keys
+2. **Project scanning**: `figma:project_ids` KV key — scans all files in specified Figma projects
+
+#### Polling (`runPollTasks`)
+- **Cron**: Every 6 hours (`0 */6 * * *`)
+- **File resolution**: Checks `figma:file_keys` allowlist first, falls back to scanning `figma:project_ids`
+- **Version detection**: Fetches `/v1/files/{key}/versions`, filters to versions newer than last poll
+- **Autosave detection**: Compares `last_modified` timestamps between polls — if changed but no named version, emits `file.edited` event
+- **Cursor**: KV key `figma:last_poll:{fileKey}`, defaults to 6 hours back
+- **Rate limiting**: 500ms delay between files
+
+#### Deep Backfill (`POST /backfill`)
+- Configurable lookback: `?days=7` (default)
+- Fetches both versions and comments for all watched files
+- Updates poll cursors after completion to avoid re-fetch
+- 500ms delay between API calls per file
+
+#### Auto-Tagging
+`inferTags()` applies tags based on file name and content keywords: `design-update`, `design-feedback`, `design-system`, `icons`, `prototype`, `design-review`, `design-fix`, `library-publish`, `autosave`
+
+#### Wrangler Config
+```jsonc
+{
+  "name": "openchief-connector-figma",
+  "queues": { "producers": [{ "queue": "openchief-events", "binding": "EVENTS_QUEUE" }] },
+  "kv_namespaces": [{ "binding": "KV" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "openchief-db" }],
+  "triggers": { "crons": ["0 */6 * * *"] }
+  // Secrets: FIGMA_TOKEN, FIGMA_PASSCODE, FIGMA_CLIENT_ID, FIGMA_CLIENT_SECRET, ADMIN_SECRET
+}
+```
+
+---
+
 ## Other Connectors
 
-All 14 connectors are fully implemented. Beyond GitHub and Slack (documented in detail above), these connectors follow the same patterns:
+All 14 connectors are fully implemented. Beyond GitHub, Slack, and Figma (documented in detail above), these connectors follow the same patterns:
 
 | Connector | Worker Name | Type | Key Features |
 |-----------|-------------|------|-------------|
 | discord | openchief-connector-discord | Webhook (Ed25519) + Polling | Deep backfill, configurable channel allowlist via `DISCORD_ALLOWED_CHANNELS` env var |
-| figma | openchief-connector-figma | OAuth + Webhook + Polling | Most sophisticated connector — version history, autosave detection, comment backfill, file activity tracking |
 | jira | openchief-connector-jira | Polling | Issues, transitions, comments, sprints |
 | jpd | openchief-connector-jpd | Polling | Jira Product Discovery — filters for Idea issue types via JQL |
 | notion | openchief-connector-notion | Polling (15m) | Pages, database entries, comments; deduplicates DB entries (which are also pages) |
