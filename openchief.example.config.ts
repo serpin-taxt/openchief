@@ -36,6 +36,7 @@ const config: OpenChiefConfig = {
   auth: {
     provider: "none",
     // teamDomain: "your-team.cloudflareaccess.com", // required for "cloudflare-access"
+    // superadminEmail: "you@company.com", // full access: connections, exec agents, role management
     // For "password" mode: run `wrangler secret put ADMIN_PASSWORD` in workers/dashboard
   },
 

@@ -189,6 +189,7 @@ async function main() {
   // ── Authentication ──────────────────────────────────────────────────────
   let authProvider: "none" | "cloudflare-access" | "password" = "none";
   let cfAccessTeamDomain = "";
+  let superadminEmail = "";
   if (!TEST_MODE && mode === "deploy") {
     header("Authentication");
     print(`  ${c.white}How should the dashboard be protected?${c.reset}`);
@@ -206,6 +207,15 @@ async function main() {
       print(`  ${c.dim}to protect your dashboard. The deploy script will show the steps.${c.reset}`);
     } else if (authChoice === "2") {
       authProvider = "password";
+    }
+
+    // Superadmin email (for Cloudflare Access or password auth)
+    if (authProvider !== "none") {
+      print("");
+      print(`  ${c.white}Superadmin email${c.reset}`);
+      print(`  ${c.dim}This user gets full access: connections, exec agents, and role management.${c.reset}`);
+      print(`  ${c.dim}Other users will have limited access by default.${c.reset}`);
+      superadminEmail = await ask("Email address");
     }
   }
 
@@ -425,7 +435,7 @@ const config: OpenChiefConfig = {
   },
 
   auth: {
-    provider: ${JSON.stringify(authProvider)},${cfAccessTeamDomain ? `\n    teamDomain: ${JSON.stringify(cfAccessTeamDomain)},` : ""}
+    provider: ${JSON.stringify(authProvider)},${cfAccessTeamDomain ? `\n    teamDomain: ${JSON.stringify(cfAccessTeamDomain)},` : ""}${superadminEmail ? `\n    superadminEmail: ${JSON.stringify(superadminEmail)},` : ""}
   },
 
   ${githubRepo ? `github: {\n    repo: ${JSON.stringify(githubRepo)},\n  },\n` : ""}

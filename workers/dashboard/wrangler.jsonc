@@ -23,6 +23,16 @@
     {
       "binding": "AGENT_RUNTIME",
       "service": "openchief-runtime"
+    },
+    // Connector service bindings — add one per enabled connector for "Sync Now" support.
+    // Workers can't call other Workers via workers.dev URLs, so service bindings are required.
+    {
+      "binding": "CONNECTOR_GITHUB",
+      "service": "openchief-connector-github"
+    },
+    {
+      "binding": "CONNECTOR_SLACK",
+      "service": "openchief-connector-slack"
     }
   ],
   "vars": {

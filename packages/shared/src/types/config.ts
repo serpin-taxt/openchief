@@ -51,6 +51,8 @@ export interface OpenChiefConfig {
     provider: "none" | "cloudflare-access" | "password";
     /** Cloudflare Access team domain (required if provider is "cloudflare-access") */
     teamDomain?: string;
+    /** Superadmin email — this user gets full access (connections, exec agents, role management) */
+    superadminEmail?: string;
   };
 
   /** GitHub repo for code-watching agents (optional) */

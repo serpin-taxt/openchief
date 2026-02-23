@@ -13,6 +13,9 @@ import {
   Activity,
   Users,
   Zap,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 import {
@@ -20,6 +23,7 @@ import {
   type ConnectorConfigResponse,
   type ConnectorConfigField,
   type ConnectionEvent,
+  type SyncResult,
 } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -307,26 +311,36 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
       {
         step: "Create a Slack App",
         detail:
-          "Go to api.slack.com/apps and click Create New App → From scratch. Name it (e.g. OpenChief) and select your workspace.",
+          "Go to api.slack.com/apps and click Create New App. Choose From an app manifest, select your workspace, then paste the JSON manifest (see Claude Code tab for the full manifest). Alternatively, create From scratch and configure manually.",
       },
       {
-        step: "Configure bot permissions",
+        step: "Configure via App Manifest (recommended)",
         detail:
-          "Under OAuth & Permissions, add these Bot Token Scopes: channels:history, channels:read, groups:history, groups:read, users:read, users:read.email, reactions:read.",
+          'If you created from scratch, go to App Manifest in the sidebar and paste the manifest JSON. This sets all permissions and events at once. The manifest configures: Bot scopes (channels:history, channels:join, channels:read, groups:history, groups:read, reactions:read, team:read, users:read, users:read.email), Event subscriptions (message.channels, message.groups, reaction_added, reaction_removed, member_joined_channel, member_left_channel, channel_created, channel_archive, channel_unarchive, team_join), and the webhook request URL.',
       },
       {
-        step: "Enable Event Subscriptions",
+        step: "Verify the webhook URL",
         detail:
-          "Turn on Event Subscriptions and set the Request URL to your Slack connector worker URL. Subscribe to bot events: message.channels, message.groups, reaction_added, member_joined_channel.",
+          "After saving the manifest, Slack will verify your webhook URL. Make sure your Slack connector worker is deployed first. If you see a verification warning, click the verify link. The worker handles the url_verification challenge automatically.",
       },
       {
-        step: "Install to workspace and get credentials",
+        step: "Install to workspace",
         detail:
-          "Install the app to your workspace. Copy the Bot User OAuth Token (xoxb-...) and the Signing Secret from Basic Information. Enter them below along with an Admin Secret.",
+          'Click "Install App" in the sidebar, then "Install to Workspace". Review the permissions and click Allow. Copy the Bot User OAuth Token (xoxb-...) from the page that appears.',
+      },
+      {
+        step: "Get the Signing Secret",
+        detail:
+          'Go to "Basic Information" in the sidebar. Under App Credentials, copy the Signing Secret. This is used to verify that webhook requests are genuinely from Slack.',
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Fill in: Bot Token (xoxb-...), Signing Secret, and an Admin Secret (generate one with: openssl rand -hex 32). The bot will auto-join public channels on its first poll and begin backfilling message history.",
       },
     ],
     claudeCode:
-      'Use Claude Code with browser automation: "Create a new Slack App for OpenChief on my workspace at api.slack.com. Set up bot permissions for reading channels, groups, users, and reactions. Enable Event Subscriptions with my Slack connector worker URL. Install to the workspace and set the wrangler secrets (SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, ADMIN_SECRET)."',
+      'You can automate the Slack App setup using Claude Code with browser automation. Use this prompt:\n\n"Create a new Slack App for OpenChief on my workspace at api.slack.com. Use the App Manifest approach — navigate to api.slack.com/apps, click Create New App → From an app manifest, select my workspace, and paste this manifest:"\n\n```json\n{\n  "display_information": {\n    "name": "OpenChief",\n    "description": "AI agents that passively watch your tools and produce reports",\n    "background_color": "#0a0a0a"\n  },\n  "features": {\n    "bot_user": {\n      "display_name": "OpenChief",\n      "always_online": true\n    }\n  },\n  "oauth_config": {\n    "scopes": {\n      "bot": [\n        "channels:history", "channels:join", "channels:read",\n        "groups:history", "groups:read", "reactions:read",\n        "team:read", "users:read", "users:read.email"\n      ]\n    }\n  },\n  "settings": {\n    "event_subscriptions": {\n      "request_url": "YOUR_SLACK_CONNECTOR_WORKER_URL/webhook",\n      "bot_events": [\n        "channel_archive", "channel_created", "channel_unarchive",\n        "member_joined_channel", "member_left_channel",\n        "message.channels", "message.groups",\n        "reaction_added", "reaction_removed", "team_join"\n      ]\n    },\n    "org_deploy_enabled": false,\n    "socket_mode_enabled": false,\n    "token_rotation_enabled": false\n  }\n}\n```\n\n"Then install the app to the workspace, copy the Bot Token and Signing Secret, and set the wrangler secrets (SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, ADMIN_SECRET) on the connector worker."',
   },
 };
 
@@ -496,6 +510,74 @@ function ConfigurationSection({
 }
 
 // ---------------------------------------------------------------------------
+// Sync Result Details (connector-specific formatting)
+// ---------------------------------------------------------------------------
+
+function SyncResultDetails({ source, result }: { source: string; result: SyncResult }) {
+  if (!result.ok) {
+    return (
+      <Card className="border-destructive/50 bg-destructive/5">
+        <CardContent className="flex items-start gap-3 py-4">
+          <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div>
+            <p className="text-sm font-medium text-destructive">Sync failed</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {result.error ?? "Unknown error"}
+              {result.detail && (
+                <span className="block mt-1 font-mono">{result.detail}</span>
+              )}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const data = result as Record<string, unknown>;
+  // The backend spreads the connector response, so nested data lives under `result`
+  const nested = (data.result && typeof data.result === "object" ? data.result : data) as Record<string, unknown>;
+
+  // Identity sync result — connector returns { userSync: { synced, skipped } }
+  const userSync = nested.userSync as Record<string, number> | undefined;
+  if (userSync) {
+    const parts: string[] = [];
+    if (userSync.synced !== undefined) parts.push(`Users synced: ${userSync.synced}`);
+    if (userSync.skipped !== undefined) parts.push(`Skipped: ${userSync.skipped}`);
+
+    return (
+      <Card className="border-emerald-500/50 bg-emerald-500/5">
+        <CardContent className="flex items-start gap-3 py-4">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div>
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Humans synced</p>
+            {parts.length > 0 ? (
+              <p className="mt-1 text-xs text-muted-foreground">{parts.join(" · ")}</p>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">Human sync completed</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Generic fallback
+  return (
+    <Card className="border-emerald-500/50 bg-emerald-500/5">
+      <CardContent className="flex items-start gap-3 py-4">
+        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Sync completed</p>
+          <pre className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">
+            {JSON.stringify(nested, null, 2)}
+          </pre>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ConnectionDetail
 // ---------------------------------------------------------------------------
 
@@ -509,6 +591,8 @@ export function ConnectionDetail() {
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
 
   const loadData = useCallback(async () => {
     if (!source) return;
@@ -573,6 +657,32 @@ export function ConnectionDetail() {
     }
   }
 
+  async function handleSync() {
+    if (!source) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const result = await api.post<SyncResult>(`connections/${source}/sync`);
+      setSyncResult(result);
+      // Refresh page data after a short delay on success
+      if (result.ok) {
+        setTimeout(() => loadData(), 2000);
+      }
+    } catch (err) {
+      setSyncResult({
+        ok: false,
+        error: err instanceof Error ? err.message : "Sync request failed",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  // Check if ADMIN_SECRET is configured (needed for sync)
+  const adminSecretConfigured = config?.fields.some(
+    (f) => f.key === "ADMIN_SECRET" && f.configured,
+  ) ?? false;
+
   const hasChanges = Object.keys(fieldValues).length > 0;
 
   if (loading) {
@@ -595,21 +705,48 @@ export function ConnectionDetail() {
       </div>
 
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <SourceIcon name={source ?? ""} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <SourceIcon name={source ?? ""} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {config?.label ?? source}
+            </h1>
+            {config?.workerName && (
+              <p className="text-sm text-muted-foreground">
+                Worker: {config.workerName}
+              </p>
+            )}
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {config?.label ?? source}
-          </h1>
-          {config?.workerName && (
-            <p className="text-sm text-muted-foreground">
-              Worker: {config.workerName}
-            </p>
-          )}
-        </div>
+        {adminSecretConfigured && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSync}
+            disabled={syncing}
+          >
+            {syncing ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                Syncing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                Sync Humans
+              </>
+            )}
+          </Button>
+        )}
       </div>
+
+      {/* Sync Result */}
+      {syncResult && source && (
+        <SyncResultDetails source={source} result={syncResult} />
+      )}
 
       {/* Charts */}
       {stats && events.length > 0 && (
@@ -657,27 +794,46 @@ export function ConnectionDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {events.map((event) => (
-                    <TableRow key={event.id}>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {event.eventType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate text-sm">
-                        {event.summary}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {event.actor ?? "--"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {event.project ?? "--"}
-                      </TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">
-                        {timeAgo(event.timestamp)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {events.map((event) => {
+                    const isExec = event.tags?.includes("exec");
+                    return (
+                      <TableRow
+                        key={event.id}
+                        className={isExec ? "opacity-60" : undefined}
+                      >
+                        <TableCell>
+                          <span className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-xs">
+                              {event.eventType}
+                            </Badge>
+                            {isExec && (
+                              <Badge className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0 dark:bg-amber-900/40 dark:text-amber-300">
+                                Exec
+                              </Badge>
+                            )}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-xs truncate text-sm">
+                          {isExec ? (
+                            <span className="italic text-muted-foreground">
+                              Private channel activity
+                            </span>
+                          ) : (
+                            event.summary
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {isExec ? "---" : (event.actor ?? "--")}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {isExec ? "---" : (event.project ?? "--")}
+                        </TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {timeAgo(event.timestamp)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

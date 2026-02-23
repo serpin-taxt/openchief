@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export function Login() {
-  const { authenticated, provider, isAdmin, login } = useAuth();
+  const { authenticated, provider, login } = useAuth();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,7 @@ export function Login() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const result = await login(password);
+    const result = await login(email, password);
     setLoading(false);
     if (result.ok) {
       setLoginSuccess(true);
@@ -84,24 +85,31 @@ export function Login() {
           </div>
           <CardTitle>OpenChief</CardTitle>
           <CardDescription>
-            Enter your admin password to continue.
+            Sign in to continue.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoFocus
+              disabled={loading}
+            />
+            <Input
               type="password"
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoFocus
               disabled={loading}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button
               type="submit"
               className="w-full"
-              disabled={loading || !password}
+              disabled={loading || !email || !password}
             >
               {loading ? (
                 <>

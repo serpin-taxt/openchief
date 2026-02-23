@@ -27,6 +27,10 @@ interface Env {
   DEMO_MODE?: string;
   /** Organization name for branding (set via wrangler vars from openchief.config.ts) */
   ORG_NAME?: string;
+  /** Superadmin email — this user gets full access (connections, exec agents, role management) */
+  SUPERADMIN_EMAIL?: string;
+  /** Connector service bindings — one per enabled connector (e.g. CONNECTOR_SLACK, CONNECTOR_GITHUB) */
+  [key: `CONNECTOR_${string}`]: Fetcher | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,8 +347,7 @@ const SESSION_COOKIE = "oc_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const textEncoder = new TextEncoder();
 
-async function createSessionToken(secret: string): Promise<string> {
-  const email = "admin";
+async function createSessionToken(secret: string, email: string): Promise<string> {
   const expiry = Date.now() + SESSION_TTL_MS;
   const payload = `${email}|${expiry}`;
 
@@ -441,9 +444,37 @@ async function getUserEmail(request: Request, env: Env): Promise<string> {
   return "unknown";
 }
 
-function canAccessAgent(config: AgentDefinition, userEmail: string): boolean {
-  if (config.visibility === "exec" && config.allowedEmails && config.allowedEmails.length > 0) {
-    return config.allowedEmails.includes(userEmail.toLowerCase());
+type UserRole = "superadmin" | "exec" | null;
+
+async function getUserRole(email: string, env: Env): Promise<UserRole> {
+  // Superadmin check — config-defined email takes priority
+  if (
+    env.SUPERADMIN_EMAIL &&
+    email.toLowerCase() === env.SUPERADMIN_EMAIL.toLowerCase()
+  ) {
+    return "superadmin";
+  }
+
+  // Check identity_mappings for stored role
+  try {
+    const row = await env.DB.prepare(
+      "SELECT role FROM identity_mappings WHERE email = ? LIMIT 1",
+    )
+      .bind(email)
+      .first<{ role: string | null }>();
+    if (row?.role === "exec" || row?.role === "superadmin") {
+      return row.role as UserRole;
+    }
+  } catch {
+    // identity_mappings table may not exist yet — graceful fallback
+  }
+
+  return null;
+}
+
+function canAccessAgent(agentVisibility: string | undefined, userRole: UserRole): boolean {
+  if (agentVisibility === "exec") {
+    return userRole === "superadmin" || userRole === "exec";
   }
   return true;
 }
@@ -580,8 +611,12 @@ export default {
       if (agentSubMatch) {
         const guardId = decodeURIComponent(agentSubMatch[1]);
         const guardConfig = await loadAgentConfig(env.DB, guardId);
-        if (guardConfig && !canAccessAgent(guardConfig, await getUserEmail(request, env))) {
-          return errorJson("Access restricted", 403);
+        if (guardConfig) {
+          const guardEmail = await getUserEmail(request, env);
+          const guardRole = await getUserRole(guardEmail, env);
+          if (!canAccessAgent(guardConfig.visibility, guardRole)) {
+            return errorJson("Access restricted", 403);
+          }
         }
       }
 
@@ -644,8 +679,18 @@ export default {
       }
 
       // -----------------------------------------------------------------------
-      // Connections
+      // Connections (superadmin only)
       // -----------------------------------------------------------------------
+
+      // Gate all /api/connections/* routes behind superadmin role
+      if (path.startsWith("/api/connections")) {
+        const connEmail = await getUserEmail(request, env);
+        const connRole = await getUserRole(connEmail, env);
+        if (connRole !== "superadmin") {
+          return errorJson("Superadmin access required", 403);
+        }
+      }
+
       if (method === "GET" && path === "/api/connections") {
         return handleListConnections(env);
       }
@@ -679,6 +724,13 @@ export default {
         return handleGetConnectionAccess(env, source);
       }
 
+      // /api/connections/:source/sync  (trigger connector poll)
+      const connSyncMatch = path.match(/^\/api\/connections\/([^/]+)\/sync$/);
+      if (connSyncMatch && method === "POST") {
+        const source = decodeURIComponent(connSyncMatch[1]);
+        return handleConnectionSync(request, env, source);
+      }
+
       // -----------------------------------------------------------------------
       // Identities
       // -----------------------------------------------------------------------
@@ -687,6 +739,20 @@ export default {
       }
       if (method === "POST" && path === "/api/identities/merge") {
         return handleMergeIdentities(request, env);
+      }
+
+      // PUT /api/identities/:id/role (superadmin only)
+      const identityRoleMatch = path.match(/^\/api\/identities\/([^/]+)\/role$/);
+      if (identityRoleMatch && method === "PUT") {
+        const identityId = decodeURIComponent(identityRoleMatch[1]);
+        return handleUpdateIdentityRole(request, env, identityId);
+      }
+
+      // PUT /api/identities/:id/active (superadmin only)
+      const identityActiveMatch = path.match(/^\/api\/identities\/([^/]+)\/active$/);
+      if (identityActiveMatch && method === "PUT") {
+        const identityId = decodeURIComponent(identityActiveMatch[1]);
+        return handleUpdateIdentityActive(request, env, identityId);
       }
 
       // -----------------------------------------------------------------------
@@ -734,31 +800,32 @@ async function handleGetMe(request: Request, env: Env): Promise<Response> {
   let displayName: string | null = null;
   let avatarUrl: string | null = null;
   let team: string | null = null;
-  let role: string | null = null;
 
   try {
     const identity = await env.DB.prepare(
-      "SELECT display_name, avatar_url, team, role FROM identity_mappings WHERE email = ? LIMIT 1"
+      "SELECT display_name, avatar_url, team FROM identity_mappings WHERE email = ? LIMIT 1"
     )
       .bind(email)
-      .first<{ display_name: string; avatar_url: string; team: string; role: string }>();
+      .first<{ display_name: string; avatar_url: string; team: string }>();
 
     if (identity) {
       displayName = identity.display_name;
       avatarUrl = identity.avatar_url;
       team = identity.team;
-      role = identity.role;
     }
   } catch {
     // identity_mappings table may not exist yet — graceful fallback
   }
+
+  // Resolve role via getUserRole (checks SUPERADMIN_EMAIL + identity_mappings)
+  const resolvedRole = await getUserRole(email, env);
 
   return json({
     email,
     displayName: displayName || email.split("@")[0],
     avatarUrl,
     team,
-    role,
+    role: resolvedRole,
   });
 }
 
@@ -770,15 +837,19 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
     return errorJson("Password auth not enabled", 400);
   }
 
-  let body: { password?: string };
+  let body: { password?: string; email?: string };
   try {
-    body = (await request.json()) as { password?: string };
+    body = (await request.json()) as { password?: string; email?: string };
   } catch {
     return errorJson("Invalid request body", 400);
   }
 
   if (!body.password) {
     return errorJson("Password required", 400);
+  }
+
+  if (!body.email) {
+    return errorJson("Email required", 400);
   }
 
   // Constant-time comparison
@@ -795,7 +866,8 @@ async function handleLogin(request: Request, env: Env): Promise<Response> {
     return errorJson("Invalid password", 401);
   }
 
-  const token = await createSessionToken(env.ADMIN_PASSWORD);
+  const loginEmail = body.email.toLowerCase().trim();
+  const token = await createSessionToken(env.ADMIN_PASSWORD, loginEmail);
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
 
   return json(
@@ -839,10 +911,15 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
 
   if (provider === "cloudflare-access") {
     const email = request.headers.get("cf-access-authenticated-user-email");
+    let role: UserRole = null;
+    if (email) {
+      role = await getUserRole(email, env);
+    }
     return json({
       authenticated: !!email,
       provider: "cloudflare-access",
       email: email || null,
+      role,
       teamDomain: env.CF_ACCESS_TEAM_DOMAIN || null,
       demoMode,
       orgName,
@@ -855,7 +932,8 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
     if (token) {
       const email = await verifySessionToken(token, env.ADMIN_PASSWORD);
       if (email) {
-        return json({ authenticated: true, provider: "password", email, demoMode, orgName });
+        const role = await getUserRole(email, env);
+        return json({ authenticated: true, provider: "password", email, role, demoMode, orgName });
       }
     }
     return json({ authenticated: false, provider: "password", demoMode, orgName });
@@ -869,6 +947,7 @@ async function handleSessionCheck(request: Request, env: Env): Promise<Response>
 // ---------------------------------------------------------------------------
 async function handleListAgents(request: Request, env: Env): Promise<Response> {
   const userEmail = await getUserEmail(request, env);
+  const userRole = await getUserRole(userEmail, env);
   const { results } = await env.DB.prepare(
     "SELECT id, config FROM agent_definitions WHERE json_extract(config, '$.enabled') = true ORDER BY id"
   ).all<{ id: string; config: string }>();
@@ -887,8 +966,8 @@ async function handleListAgents(request: Request, env: Env): Promise<Response> {
     })
   );
 
-  // Filter out exec agents the user can't access
-  const filtered = agents.filter((a) => canAccessAgent(a, userEmail));
+  // Filter out exec agents the user can't access (role-based)
+  const filtered = agents.filter((a) => canAccessAgent(a.visibility, userRole));
 
   return json(filtered);
 }
@@ -1694,12 +1773,8 @@ async function handleGetConnectionEvents(
     timestamp: row.timestamp,
     source: row.source,
     eventType: row.event_type,
-    scope: {
-      org: row.scope_org,
-      project: row.scope_project,
-      team: row.scope_team,
-      actor: row.scope_actor,
-    },
+    actor: row.scope_actor,
+    project: row.scope_project,
     summary: row.summary,
     tags: row.tags ? JSON.parse(row.tags) : [],
   }));
@@ -1809,20 +1884,97 @@ async function handleGetConnectionAccess(
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/connections/:source/sync  — proxy to connector /poll
+// ---------------------------------------------------------------------------
+
+/** Map connector source name → env binding name (e.g. "slack" → "CONNECTOR_SLACK") */
+function connectorBindingName(source: string): `CONNECTOR_${string}` {
+  return `CONNECTOR_${source.toUpperCase().replace(/-/g, "_")}` as `CONNECTOR_${string}`;
+}
+
+async function handleConnectionSync(
+  _request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  // Read admin secret from KV (already stored when user saves connector settings)
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  const needsSecret = cfg.fields.some((f) => f.name === "ADMIN_SECRET");
+  if (needsSecret && !adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured for this connector. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  // Look up the service binding for this connector
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(
+      `Service binding "${bindingKey}" not configured. Add it to the dashboard worker's wrangler.jsonc: { "binding": "${bindingKey}", "service": "${cfg.workerName}" }`,
+      500,
+    );
+  }
+
+  try {
+    const headers: Record<string, string> = {};
+    if (adminSecret) headers["Authorization"] = `Bearer ${adminSecret}`;
+
+    // Use service binding to call the connector — avoids workers.dev routing limitations
+    // Pass ?task=identity to only sync people/identities, not backfill events
+    const resp = await binding.fetch("https://connector/poll?task=identity", { method: "POST", headers });
+    const body = await resp.text();
+
+    if (!resp.ok) {
+      return json({ ok: false, error: `Connector returned ${resp.status}`, detail: body }, resp.status);
+    }
+
+    let result: unknown;
+    try {
+      result = JSON.parse(body);
+    } catch {
+      result = { raw: body };
+    }
+    return json({ ok: true, ...((result && typeof result === "object") ? result : { result }) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/identities
 // ---------------------------------------------------------------------------
 async function handleListIdentities(env: Env): Promise<Response> {
   try {
     const { results } = await env.DB.prepare(
-      `SELECT id, email, display_name, avatar_url, team, role,
-              github_username, slack_user_id, discord_username,
-              figma_handle, jira_username, notion_user_id,
-              created_at, updated_at
+      `SELECT id, email, real_name AS realName, display_name AS displayName,
+              avatar_url AS avatarUrl, team, role,
+              github_username AS githubUsername, slack_user_id AS slackUserId,
+              discord_handle AS discordHandle, figma_handle AS figmaHandle,
+              is_bot AS isBot, is_active AS isActive,
+              created_at AS createdAt, updated_at AS updatedAt
        FROM identity_mappings
-       ORDER BY display_name ASC`
+       ORDER BY COALESCE(display_name, real_name) ASC`
     ).all();
 
-    return json(results || []);
+    // Convert integer booleans to JS booleans and resolve superadmin by email
+    const saEmail = env.SUPERADMIN_EMAIL?.toLowerCase();
+    const mapped = (results || []).map((r: Record<string, unknown>) => ({
+      ...r,
+      isBot: r.isBot === 1,
+      isActive: r.isActive === 1,
+      role:
+        saEmail && typeof r.email === "string" && r.email.toLowerCase() === saEmail
+          ? "superadmin"
+          : r.role ?? null,
+    }));
+
+    return json(mapped);
   } catch {
     // Table may not exist yet
     return json([]);
@@ -1870,10 +2022,8 @@ async function handleMergeIdentities(
     "role",
     "github_username",
     "slack_user_id",
-    "discord_username",
+    "discord_handle",
     "figma_handle",
-    "jira_username",
-    "notion_user_id",
   ];
 
   const updates: string[] = [];
@@ -1887,27 +2037,23 @@ async function handleMergeIdentities(
   }
 
   const now = new Date().toISOString();
-  const batch: D1PreparedStatement[] = [];
+
+  // Delete the secondary FIRST, then update primary in a separate statement.
+  // We can't use env.DB.batch() because D1/SQLite checks UNIQUE constraints
+  // per-statement within a transaction — the UPDATE would fail even though
+  // the DELETE ran first in the same batch.
+  await env.DB.prepare("DELETE FROM identity_mappings WHERE id = ?")
+    .bind(body.secondaryId)
+    .run();
 
   if (updates.length > 0) {
     updates.push("updated_at = ?");
     values.push(now);
     values.push(body.primaryId);
 
-    batch.push(
-      env.DB.prepare(
-        `UPDATE identity_mappings SET ${updates.join(", ")} WHERE id = ?`
-      ).bind(...values)
-    );
-  }
-
-  // Delete the secondary row
-  batch.push(
-    env.DB.prepare("DELETE FROM identity_mappings WHERE id = ?").bind(body.secondaryId)
-  );
-
-  if (batch.length > 0) {
-    await env.DB.batch(batch);
+    await env.DB.prepare(
+      `UPDATE identity_mappings SET ${updates.join(", ")} WHERE id = ?`
+    ).bind(...values).run();
   }
 
   // Return the merged primary
@@ -1918,6 +2064,86 @@ async function handleMergeIdentities(
     .first();
 
   return json(merged);
+}
+
+// ---------------------------------------------------------------------------
+// PUT /api/identities/:id/role (superadmin only)
+// ---------------------------------------------------------------------------
+async function handleUpdateIdentityRole(
+  request: Request,
+  env: Env,
+  identityId: string,
+): Promise<Response> {
+  // Only superadmin can update roles
+  const callerEmail = await getUserEmail(request, env);
+  const callerRole = await getUserRole(callerEmail, env);
+  if (callerRole !== "superadmin") {
+    return errorJson("Superadmin access required", 403);
+  }
+
+  const body = (await request.json()) as { role: "exec" | null };
+  const newRole = body.role;
+
+  // Validate role value
+  if (newRole !== null && newRole !== "exec") {
+    return errorJson("Invalid role. Must be \"exec\" or null.", 400);
+  }
+
+  // Check identity exists
+  const identity = await env.DB.prepare(
+    "SELECT id FROM identity_mappings WHERE id = ?",
+  )
+    .bind(identityId)
+    .first();
+  if (!identity) {
+    return errorJson("Identity not found", 404);
+  }
+
+  // Update role
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "UPDATE identity_mappings SET role = ?, updated_at = ? WHERE id = ?",
+  )
+    .bind(newRole, now, identityId)
+    .run();
+
+  return json({ ok: true, role: newRole });
+}
+
+// ---------------------------------------------------------------------------
+// PUT /api/identities/:id/active (superadmin only)
+// ---------------------------------------------------------------------------
+async function handleUpdateIdentityActive(
+  request: Request,
+  env: Env,
+  identityId: string,
+): Promise<Response> {
+  const callerEmail = await getUserEmail(request, env);
+  const callerRole = await getUserRole(callerEmail, env);
+  if (callerRole !== "superadmin") {
+    return errorJson("Superadmin access required", 403);
+  }
+
+  const body = (await request.json()) as { isActive: boolean };
+  const isActive = body.isActive ? 1 : 0;
+
+  const identity = await env.DB.prepare(
+    "SELECT id FROM identity_mappings WHERE id = ?",
+  )
+    .bind(identityId)
+    .first();
+  if (!identity) {
+    return errorJson("Identity not found", 404);
+  }
+
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "UPDATE identity_mappings SET is_active = ?, updated_at = ? WHERE id = ?",
+  )
+    .bind(isActive, now, identityId)
+    .run();
+
+  return json({ ok: true, isActive: isActive === 1 });
 }
 
 // ---------------------------------------------------------------------------

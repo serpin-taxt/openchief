@@ -109,23 +109,41 @@ pnpm run deploy         # Deploy to Cloudflare
 
 OpenChief ships with 15 ready-to-use agents. All agents are seeded by default — enable or disable them from the dashboard.
 
-| Agent | Watches | Focus |
-|-------|---------|-------|
-| **CEO** | All sources | Executive synthesis, cross-functional signals |
-| **CFO** | QuickBooks + Slack | Burn rate, runway, budget utilization |
-| **CPO** | Slack + GitHub | Team sentiment, hiring, onboarding |
-| **CRO** | Amplitude + Slack | Revenue growth, conversion funnels |
-| **CISO** | GitHub + Slack | Security vulnerabilities, compliance |
-| **Engineering Manager** | GitHub + Slack | PRs, builds, shipping velocity |
-| **Product Manager** | Slack + GitHub + Intercom | Customer signals, feature requests |
-| **Design Manager** | Figma + Slack + GitHub | Design activity, review cycles |
-| **Marketing Manager** | Twitter + Slack + Analytics | Brand presence, content strategy |
-| **Customer Support** | Intercom + Slack | Support tickets, response times |
-| **Community Manager** | Discord + Twitter + Slack | Community health, engagement |
-| **Data Analyst** | Amplitude + Google Analytics | User behavior, growth metrics |
-| **Head of BizDev** | Slack + CRM | Partnership pipeline, deal progress |
-| **Legal Counsel** | Slack + GitHub | Compliance risks, legal issues |
-| **Researcher** | Twitter + Slack | Industry trends, competitor moves |
+| Agent | Watches | Focus | Visibility |
+|-------|---------|-------|------------|
+| **CEO** | All sources | Executive synthesis, cross-functional signals | Exec |
+| **CFO** | QuickBooks + Slack | Burn rate, runway, budget utilization | Exec |
+| **CPO** | Slack + GitHub | Team sentiment, hiring, onboarding | Exec |
+| **CRO** | Amplitude + Slack | Revenue growth, conversion funnels | Exec |
+| **CISO** | GitHub + Slack | Security vulnerabilities, compliance | Exec |
+| **Engineering Manager** | GitHub + Slack | PRs, builds, shipping velocity | Public |
+| **Product Manager** | Slack + GitHub + Intercom | Customer signals, feature requests | Public |
+| **Design Manager** | Figma + Slack + GitHub | Design activity, review cycles | Public |
+| **Marketing Manager** | Twitter + Slack + Analytics | Brand presence, content strategy | Public |
+| **Customer Support** | Intercom + Slack | Support tickets, response times | Public |
+| **Community Manager** | Discord + Twitter + Slack | Community health, engagement | Public |
+| **Data Analyst** | Amplitude + Google Analytics | User behavior, growth metrics | Public |
+| **Head of BizDev** | Slack + CRM | Partnership pipeline, deal progress | Public |
+| **Legal Counsel** | Slack + GitHub | Compliance risks, legal issues | Public |
+| **Researcher** | Twitter + Slack | Industry trends, competitor moves | Public |
+
+### Exec vs. Public Agents
+
+OpenChief has a two-tier visibility model for handling sensitive data:
+
+- **Public agents** (default) see events from all public channels and connected sources.
+- **Exec agents** (`"visibility": "exec"`) see everything public agents see, **plus** events from private Slack channels.
+
+Any private Slack channel the bot is invited to is automatically treated as exec-level content. Events are tagged `["exec"]` at ingestion time and filtered from non-exec agents at query time. The dashboard shows exec events with an amber "Exec" badge and obfuscated content — no channel name, actor, or message text is visible in the UI.
+
+**Default exec agents:** CEO, CFO, CISO, CRO, Head of HR.
+
+**To enable exec data:**
+
+1. Invite the OpenChief Slack bot to a private channel (it cannot auto-join — by design)
+2. That's it. Events from that channel are automatically tagged and routed to exec agents only.
+
+To make any agent exec-level, add `"visibility": "exec"` to its JSON definition and re-seed.
 
 ### Create Your Own Agent
 

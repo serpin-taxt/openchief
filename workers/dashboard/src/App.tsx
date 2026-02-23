@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/lib/auth";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequireRole } from "@/components/RequireRole";
 import { Layout } from "@/components/Layout";
 import { Login } from "@/pages/Login";
 import { Home } from "@/pages/Home";
@@ -35,11 +36,14 @@ export function App() {
               path="/modules/:id/reports/:reportId"
               element={<ReportView />}
             />
-            <Route path="/connections" element={<Connections />} />
-            <Route
-              path="/connections/:source"
-              element={<ConnectionDetail />}
-            />
+            {/* Connections — superadmin only */}
+            <Route element={<RequireRole minRole="superadmin" />}>
+              <Route path="/connections" element={<Connections />} />
+              <Route
+                path="/connections/:source"
+                element={<ConnectionDetail />}
+              />
+            </Route>
             <Route path="/team" element={<Team />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/models" element={<Models />} />
