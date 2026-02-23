@@ -455,6 +455,11 @@ async function getUserRole(email: string, env: Env): Promise<UserRole> {
     return "superadmin";
   }
 
+  // Demo mode: grant exec so everyone sees all agents (but not superadmin)
+  if (env.DEMO_MODE === "true") {
+    return "exec";
+  }
+
   // Check identity_mappings for stored role
   try {
     const row = await env.DB.prepare(
