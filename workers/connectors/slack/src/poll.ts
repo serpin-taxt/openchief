@@ -107,10 +107,21 @@ async function autoJoinChannels(
     }
   }
 
-  // Cache channel list for backfill reference
-  const channelMap = channels
-    .filter((ch) => ch.is_member && !ch.is_archived)
-    .map((ch) => ({ id: ch.id, name: ch.name }));
+  // Also list private channels the bot has been invited to
+  const privateChannels = await listConversations(
+    env.SLACK_BOT_TOKEN,
+    "private_channel"
+  );
+
+  // Cache channel list for backfill reference (includes private channels with is_private flag)
+  const channelMap = [
+    ...channels
+      .filter((ch) => ch.is_member && !ch.is_archived)
+      .map((ch) => ({ id: ch.id, name: ch.name, is_private: false })),
+    ...privateChannels
+      .filter((ch) => ch.is_member && !ch.is_archived)
+      .map((ch) => ({ id: ch.id, name: ch.name, is_private: true })),
+  ];
   await env.KV.put("slack:channels:list", JSON.stringify(channelMap), {
     expirationTtl: 3600,
   });
@@ -119,6 +130,14 @@ async function autoJoinChannels(
 }
 
 // --- Task 2: User Sync ----------------------------------------------------------
+
+/** Run only identity sync (user profile sync to D1). Exported for task=identity mode. */
+export async function runIdentitySync(
+  env: PollEnv,
+): Promise<{ userSync: { synced: number; skipped: number } }> {
+  const result = await syncUserProfiles(env);
+  return { userSync: result };
+}
 
 async function syncUserProfiles(
   env: PollEnv
@@ -148,6 +167,7 @@ async function backfillMessages(
   const channels = JSON.parse(channelListRaw) as Array<{
     id: string;
     name: string;
+    is_private?: boolean;
   }>;
 
   // Load the backfill cursor (which channel index we're at)
@@ -187,7 +207,8 @@ async function backfillMessages(
             msg as unknown as Record<string, unknown>,
             ch.name,
             resolver,
-            workspaceName
+            workspaceName,
+            ch.is_private ?? false
           );
           for (const event of events) {
             await env.EVENTS_QUEUE.send(event);
@@ -261,6 +282,7 @@ export async function runDeepBackfill(
   const channels = JSON.parse(channelListRaw) as Array<{
     id: string;
     name: string;
+    is_private?: boolean;
   }>;
 
   // Load deep backfill cursor (separate from regular backfill)
@@ -314,7 +336,8 @@ export async function runDeepBackfill(
           msg as unknown as Record<string, unknown>,
           ch.name,
           resolver,
-          workspaceName
+          workspaceName,
+          ch.is_private ?? false
         );
         for (const event of events) {
           await env.EVENTS_QUEUE.send(event);

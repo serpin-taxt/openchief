@@ -1,6 +1,7 @@
 import { normalizeGitHubEvent } from "./normalize";
 import { verifyGitHubSignature } from "./webhook-verify";
 import { pollAllRepos } from "./poll";
+import { syncGitHubIdentities } from "./identity-sync";
 
 interface Env {
   EVENTS_QUEUE: Queue;
@@ -11,6 +12,7 @@ interface Env {
   GITHUB_REPOS: string;
   ADMIN_SECRET: string;
   POLL_CURSOR: KVNamespace;
+  DB: D1Database;
 }
 
 function requireAdmin(request: Request, env: Env): Response | null {
@@ -41,21 +43,21 @@ export default {
     }
 
     // POST /poll -- manual trigger for polling (admin only)
+    // ?task=identity  — only sync user profiles (for "Sync Humans" button)
     if (url.pathname === "/poll" && request.method === "POST") {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
+      const task = url.searchParams.get("task");
       try {
+        if (task === "identity") {
+          const result = await syncGitHubIdentities(env);
+          return Response.json({ ok: true, result: { userSync: result } });
+        }
         const results = await pollAllRepos(env);
-        return new Response(JSON.stringify({ ok: true, results }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return Response.json({ ok: true, results });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Poll failed";
-        return new Response(JSON.stringify({ ok: false, error: msg }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
+        return Response.json({ ok: false, error: msg }, { status: 500 });
       }
     }
 

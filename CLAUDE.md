@@ -137,7 +137,7 @@ Agents are **data, not code** — JSON configs in `agents/`. To add a new one:
 
 1. Create `agents/<id>.json` following the schema (see `agents/CLAUDE.md`)
 2. Required fields: `id`, `name`, `description`, `subscriptions`, `persona`, `outputs`, `enabled`
-3. Optional: `tools` (array of tool names the agent can use in chat)
+3. Optional: `tools` (array of tool names the agent can use in chat), `visibility` (`"exec"` for private channel access)
 4. Seed to D1: `pnpm seed`
 5. The seed script reads ALL `.json` files from `agents/` — no other code changes needed
 6. Add an icon mapping in `workers/dashboard/src/components/AppSidebar.tsx` `agentIconMap`
@@ -162,6 +162,18 @@ Each agent definition has an optional `tools: string[]` array. Tools are looked 
 | `github_search` | Code search in configured GitHub repo | eng-manager, ciso |
 
 Tool access is enforced: agents without a tool in their `tools` array cannot use it in chat.
+
+## Exec Visibility (Private Channels)
+
+Private Slack channels are treated as exec-level content. Events from private channels are tagged `["exec"]` and only visible to agents with `"visibility": "exec"`.
+
+- **Tagging**: The Slack connector automatically tags events from private channels with `"exec"` in the `tags` field. No configuration needed — any private channel the bot is invited to becomes an exec source.
+- **Agent filtering**: At report generation time, the runtime excludes exec-tagged events from agents without `"visibility": "exec"`. Exec agents see everything.
+- **Dashboard obfuscation**: The connection detail page shows exec events with an amber "Exec" badge, replaces the summary with *"Private channel activity"*, and hides the actor and project fields.
+- **Manual invite required**: The bot cannot auto-join private channels. An admin must manually invite the OpenChief bot to each private channel they want monitored.
+- **Default exec agents**: CEO, CFO, CISO, CRO, Head of HR ship with `"visibility": "exec"`.
+
+See `agents/CLAUDE.md` for full setup instructions.
 
 ## Configuration System
 

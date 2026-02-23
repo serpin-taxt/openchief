@@ -2,12 +2,14 @@
 // API type definitions
 // ---------------------------------------------------------------------------
 
+export type UserRole = "superadmin" | "exec" | null;
+
 export interface CurrentUser {
   email: string;
   displayName: string | null;
   avatarUrl: string | null;
   team: string | null;
-  role: string | null;
+  role: UserRole;
 }
 
 export interface ChatMessage {
@@ -42,6 +44,7 @@ export interface ConnectionEvent {
   project: string | null;
   summary: string;
   timestamp: string;
+  tags: string[];
 }
 
 export interface Identity {
@@ -103,6 +106,13 @@ export interface ModelSetting {
   maxTokens: number;
   updatedAt: string;
   updatedBy: string | null;
+}
+
+export interface SyncResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+  detail?: string;
 }
 
 // ---------------------------------------------------------------------------

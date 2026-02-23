@@ -49,7 +49,10 @@ Every agent JSON file must have these fields:
 
   // Capabilities
   "enabled": boolean,          // Whether the agent actively generates reports
-  "tools"?: string[]           // Optional: ["query_events", "github_file", "github_search"]
+  "tools"?: string[],          // Optional: ["query_events", "github_file", "github_search"]
+
+  // Access Control
+  "visibility"?: "public" | "exec"  // Default: "public". See "Exec Visibility" below.
 }
 ```
 
@@ -62,6 +65,38 @@ Every agent JSON file must have these fields:
 | `github_search` | Search code in the configured GitHub repo | eng-manager, ciso |
 
 Agents without a tool in their `tools` array cannot use it — access is enforced at runtime.
+
+## Exec Visibility (Private Channels)
+
+Agents with `"visibility": "exec"` can see events from **private Slack channels**. All other agents are automatically filtered from seeing these events.
+
+### How It Works
+
+1. **Any private Slack channel = exec.** When the Slack bot is invited to a private channel, all events from that channel are automatically tagged `["exec"]`.
+2. **Agents with `"visibility": "exec"`** receive exec-tagged events in their reports and chat context.
+3. **All other agents** (default `"public"` visibility) have exec events excluded from their queries — they never see private channel content.
+4. **The dashboard** shows exec events with an amber "Exec" badge and obfuscated content (*"Private channel activity"*) — no channel name, actor, or message text is displayed.
+
+### Setup
+
+1. **Invite the bot**: Manually add the OpenChief Slack bot to any private channel. The bot cannot auto-join private channels — this is by design.
+2. **Set agent visibility**: Add `"visibility": "exec"` to any agent that should see private channel data, then re-seed:
+   ```json
+   {
+     "id": "my-agent",
+     "visibility": "exec",
+     ...
+   }
+   ```
+3. **Re-seed**: Run `pnpm seed` to update agent definitions in D1.
+
+### Default Exec Agents
+
+These agents ship with `"visibility": "exec"`: **CEO**, **CFO**, **CISO**, **CRO**, **Head of HR**.
+
+### No Private Channel = No Exec Events
+
+If the bot is not invited to any private channels, the exec system has no effect. Agents with `"visibility": "exec"` simply receive no additional data beyond what public-visibility agents see.
 
 ## Available Sources
 

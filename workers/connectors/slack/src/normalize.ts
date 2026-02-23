@@ -17,48 +17,66 @@ export async function normalizeSlackEvent(
   event: Record<string, unknown>,
   channelName: string | undefined,
   resolveUser: UserResolver,
-  workspaceName: string
+  workspaceName: string,
+  isPrivateChannel: boolean = false
 ): Promise<OpenChiefEvent[]> {
   const eventType = event.type as string;
   const now = new Date().toISOString();
 
+  let events: OpenChiefEvent[];
+
   switch (eventType) {
     case "message":
-      return normalizeMessage(
+      events = await normalizeMessage(
         event,
         channelName,
         resolveUser,
         workspaceName,
         now
       );
+      break;
     case "reaction_added":
     case "reaction_removed":
-      return normalizeReaction(
+      events = await normalizeReaction(
         event,
         channelName,
         resolveUser,
         workspaceName,
         now
       );
+      break;
     case "channel_created":
-      return normalizeChannelCreated(event, resolveUser, workspaceName, now);
+      events = await normalizeChannelCreated(event, resolveUser, workspaceName, now);
+      break;
     case "channel_archive":
     case "channel_unarchive":
-      return normalizeChannelArchive(event, channelName, workspaceName, now);
+      events = await normalizeChannelArchive(event, channelName, workspaceName, now);
+      break;
     case "member_joined_channel":
     case "member_left_channel":
-      return normalizeMemberEvent(
+      events = await normalizeMemberEvent(
         event,
         channelName,
         resolveUser,
         workspaceName,
         now
       );
+      break;
     case "team_join":
-      return normalizeTeamJoin(event, resolveUser, workspaceName, now);
+      events = await normalizeTeamJoin(event, resolveUser, workspaceName, now);
+      break;
     default:
-      return [];
+      events = [];
   }
+
+  // Tag events from private channels as exec (restricted to exec-visibility agents)
+  if (isPrivateChannel && events.length > 0) {
+    for (const evt of events) {
+      evt.tags = evt.tags ? [...evt.tags, "exec"] : ["exec"];
+    }
+  }
+
+  return events;
 }
 
 // --- Message Normalization ------------------------------------------------------

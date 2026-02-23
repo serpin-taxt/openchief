@@ -624,7 +624,8 @@ export class AgentDurableObject extends DurableObject<Env> {
     }>,
     cutoff: string,
     nowStr: string,
-    limit: number
+    limit: number,
+    agentVisibility?: "public" | "exec"
   ): Promise<
     Array<{
       timestamp: string;
@@ -634,11 +635,18 @@ export class AgentDurableObject extends DurableObject<Env> {
       payload: string;
     }>
   > {
+    // Non-exec agents cannot see exec-tagged events (private Slack channels)
+    const excludeExec = agentVisibility !== "exec";
+    const execFilter = excludeExec
+      ? "AND (tags IS NULL OR tags NOT LIKE '%\"exec\"%')"
+      : "";
+
     // Empty subscriptions = subscribe to ALL events (e.g. CEO agent)
     if (subscriptions.length === 0) {
       const sql = `SELECT timestamp, source, event_type, summary, payload
         FROM events
         WHERE timestamp >= ? AND timestamp <= ?
+        ${execFilter}
         ORDER BY timestamp ASC
         LIMIT ?`;
       const result = await this.env.DB.prepare(sql).bind(cutoff, nowStr, limit).all();
@@ -702,6 +710,7 @@ export class AgentDurableObject extends DurableObject<Env> {
       FROM events
       WHERE timestamp >= ? AND timestamp <= ?
         AND (${subClauses.join(" OR ")})
+        ${execFilter}
       ORDER BY timestamp ASC
       LIMIT ?`;
 
@@ -747,7 +756,8 @@ export class AgentDurableObject extends DurableObject<Env> {
       config.subscriptions,
       cutoff,
       nowStr,
-      eventLimit
+      eventLimit,
+      config.visibility
     );
 
     // Skip if no events (unless weekly)

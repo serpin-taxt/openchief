@@ -150,7 +150,10 @@ export function AppSidebar({
   collapsed,
 }: AppSidebarProps) {
   const location = useLocation();
-  const { provider, logout, orgName } = useAuth();
+  const { provider, logout, orgName, role } = useAuth();
+
+  const isExecOrAbove = role === "superadmin" || role === "exec";
+  const isSuperadmin = role === "superadmin";
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + "/");
@@ -221,7 +224,7 @@ export function AppSidebar({
         />
         {agentsOpen && !collapsed && (
           <div className="ml-4">
-            {execAgents.length > 0 && (
+            {isExecOrAbove && execAgents.length > 0 && (
               <>
                 <p className="mb-0.5 mt-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-amber-500/70">
                   Exec
@@ -241,7 +244,7 @@ export function AppSidebar({
                 })}
               </>
             )}
-            {teamAgents.length > 0 && execAgents.length > 0 && (
+            {teamAgents.length > 0 && isExecOrAbove && execAgents.length > 0 && (
               <p className="mb-0.5 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                 Team
               </p>
@@ -273,41 +276,45 @@ export function AppSidebar({
           collapsed={collapsed}
         />
 
-        {/* Connections — toggleable */}
-        <NavToggle
-          icon={<Cable className="h-4 w-4" />}
-          label="Connections"
-          open={connectionsOpen}
-          onToggle={() => setConnectionsOpen((o) => !o)}
-          collapsed={collapsed}
-          childActive={anyConnectionActive}
-        />
-        {connectionsOpen && !collapsed && (
-          <div className="ml-4">
-            {connections.map((conn) => (
-              <NavItem
-                key={conn.source}
-                to={`/connections/${conn.source}`}
-                icon={<SourceIcon name={conn.source} className="h-4 w-4" />}
-                label={conn.label}
-                active={isActive(`/connections/${conn.source}`)}
-                collapsed={collapsed}
-                trailing={
-                  !collapsed ? (
-                    <span
-                      className={cn(
-                        "ml-auto inline-block h-2 w-2 rounded-full",
-                        conn.lastEventAt ? "bg-emerald-400" : "bg-muted",
-                      )}
-                    />
-                  ) : undefined
-                }
-              />
-            ))}
-            {connections.length === 0 && (
-              <p className="px-2 py-1 text-xs text-muted-foreground">No connections</p>
+        {/* Connections — superadmin only */}
+        {isSuperadmin && (
+          <>
+            <NavToggle
+              icon={<Cable className="h-4 w-4" />}
+              label="Connections"
+              open={connectionsOpen}
+              onToggle={() => setConnectionsOpen((o) => !o)}
+              collapsed={collapsed}
+              childActive={anyConnectionActive}
+            />
+            {connectionsOpen && !collapsed && (
+              <div className="ml-4">
+                {connections.map((conn) => (
+                  <NavItem
+                    key={conn.source}
+                    to={`/connections/${conn.source}`}
+                    icon={<SourceIcon name={conn.source} className="h-4 w-4" />}
+                    label={conn.label}
+                    active={isActive(`/connections/${conn.source}`)}
+                    collapsed={collapsed}
+                    trailing={
+                      !collapsed ? (
+                        <span
+                          className={cn(
+                            "ml-auto inline-block h-2 w-2 rounded-full",
+                            conn.lastEventAt ? "bg-emerald-400" : "bg-muted",
+                          )}
+                        />
+                      ) : undefined
+                    }
+                  />
+                ))}
+                {connections.length === 0 && (
+                  <p className="px-2 py-1 text-xs text-muted-foreground">No connections</p>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
 
         <NavItem

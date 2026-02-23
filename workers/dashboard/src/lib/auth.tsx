@@ -6,6 +6,7 @@ import {
   useCallback,
 } from "react";
 import type { ReactNode } from "react";
+import type { UserRole } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,10 +29,12 @@ interface AuthState {
   isAdmin: boolean;
   /** Organization name from server config */
   orgName: string | null;
+  /** User's resolved role: superadmin, exec, or null (regular) */
+  role: UserRole;
 }
 
 interface AuthContextType extends AuthState {
-  login: (password: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -54,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     demoMode: false,
     isAdmin: false,
     orgName: null,
+    role: null,
   });
 
   // Check session on mount
@@ -68,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           demoMode?: boolean;
           isAdmin?: boolean;
           orgName?: string | null;
+          role?: UserRole;
         }) => {
           setState({
             checked: true,
@@ -77,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             demoMode: data.demoMode || false,
             isAdmin: data.isAdmin || false,
             orgName: data.orgName || null,
+            role: data.role || null,
           });
         },
       )
@@ -90,30 +96,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           demoMode: false,
           isAdmin: false,
           orgName: null,
+          role: null,
         });
       });
   }, []);
 
-  const login = useCallback(async (password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
       if (res.ok) {
-        // Re-fetch session to pick up isAdmin and updated provider state
+        // Re-fetch session to pick up role and updated provider state
         const sessionRes = await fetch("/api/auth/session");
         const session = (await sessionRes.json().catch(() => ({}))) as {
           authenticated?: boolean;
           provider?: string;
           demoMode?: boolean;
           isAdmin?: boolean;
+          role?: UserRole;
         };
         setState((prev) => ({
           ...prev,
           authenticated: true,
           isAdmin: session.isAdmin || false,
+          role: session.role || null,
         }));
         return { ok: true };
       }
@@ -128,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-    setState((prev) => ({ ...prev, authenticated: false }));
+    setState((prev) => ({ ...prev, authenticated: false, role: null }));
   }, []);
 
   return (

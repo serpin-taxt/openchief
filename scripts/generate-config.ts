@@ -316,6 +316,22 @@ async function main() {
             );
           }
         }
+
+        // Set SUPERADMIN_EMAIL var when configured
+        if (config.auth.superadminEmail) {
+          if (content.includes('"SUPERADMIN_EMAIL"')) {
+            content = content.replace(
+              /"SUPERADMIN_EMAIL"\s*:\s*"[^"]*"/,
+              `"SUPERADMIN_EMAIL": "${config.auth.superadminEmail}"`
+            );
+          } else {
+            // Insert after AUTH_PROVIDER line
+            content = content.replace(
+              /("AUTH_PROVIDER"\s*:\s*"[^"]*")/,
+              `$1,\n    "SUPERADMIN_EMAIL": "${config.auth.superadminEmail}"`
+            );
+          }
+        }
       }
     }
 

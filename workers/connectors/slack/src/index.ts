@@ -10,7 +10,7 @@
 import { verifySlackSignature } from "./webhook-verify";
 import { normalizeSlackEvent } from "./normalize";
 import { resolveUser } from "./user-cache";
-import { runPollTasks, runDeepBackfill } from "./poll";
+import { runPollTasks, runIdentitySync, runDeepBackfill } from "./poll";
 import { getTeamInfo } from "./slack-api";
 import { isChannelIgnored } from "./ignored-channels";
 
@@ -41,11 +41,16 @@ export default {
     const url = new URL(request.url);
 
     // POST /poll -- manual trigger for polling (admin only)
+    // ?task=identity  — only sync user profiles (for "Sync People" button)
     if (url.pathname === "/poll" && request.method === "POST") {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
+      const task = url.searchParams.get("task");
       try {
-        const result = await runPollTasks(env);
+        const result =
+          task === "identity"
+            ? await runIdentitySync(env)
+            : await runPollTasks(env);
         return Response.json({ ok: true, result }, { status: 200 });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Poll failed";
@@ -143,13 +148,20 @@ async function handleEventCallback(
     // Get workspace name
     const workspaceName = await getCachedWorkspaceName(env);
 
-    // Resolve channel name from KV cache
+    // Resolve channel info from KV cache
     const channelId =
       (slackEvent.channel as string) ||
       ((slackEvent.item as Record<string, unknown>)?.channel as string);
-    const channelName = channelId
-      ? await getCachedChannelName(channelId, env)
-      : undefined;
+    const channelInfo = channelId
+      ? await getCachedChannelInfo(channelId, env)
+      : { name: undefined, isPrivate: false };
+    const channelName = channelInfo.name;
+
+    // Determine if this is a private channel event
+    // Prefer channel_type from Slack webhook payload (authoritative), fall back to cache
+    const channelType = slackEvent.channel_type as string | undefined;
+    const isPrivateChannel =
+      channelType === "group" || (!channelType && channelInfo.isPrivate);
 
     // Skip ignored channels
     if (channelName && isChannelIgnored(channelName, env.IGNORED_CHANNELS)) {
@@ -165,7 +177,8 @@ async function handleEventCallback(
       slackEvent,
       channelName,
       resolver,
-      workspaceName
+      workspaceName,
+      isPrivateChannel
     );
 
     // Enqueue
@@ -198,18 +211,19 @@ async function getCachedWorkspaceName(env: Env): Promise<string> {
   }
 }
 
-async function getCachedChannelName(
+async function getCachedChannelInfo(
   channelId: string,
   env: Env
-): Promise<string | undefined> {
+): Promise<{ name?: string; isPrivate: boolean }> {
   const listRaw = await env.KV.get("slack:channels:list");
   if (listRaw) {
     const channels = JSON.parse(listRaw) as Array<{
       id: string;
       name: string;
+      is_private?: boolean;
     }>;
     const found = channels.find((c) => c.id === channelId);
-    if (found) return found.name;
+    if (found) return { name: found.name, isPrivate: found.is_private ?? false };
   }
-  return undefined;
+  return { name: undefined, isPrivate: false };
 }
