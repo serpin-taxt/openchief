@@ -16,6 +16,7 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
+  FolderOpen,
 } from "lucide-react";
 import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 import {
@@ -24,6 +25,8 @@ import {
   type ConnectorConfigField,
   type ConnectionEvent,
   type SyncResult,
+  type FigmaFile,
+  type FigmaFilesResponse,
 } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -55,6 +58,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SourceIcon } from "@/components/SourceIcon";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface AgentAccess {
   id: string;
@@ -375,9 +379,14 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
           'Generate a random passcode (openssl rand -hex 20). This passcode validates incoming webhook payloads from Figma. You will set it as the FIGMA_PASSCODE secret and use it when registering webhooks.',
       },
       {
+        step: "Find your Figma Team ID",
+        detail:
+          "Navigate to your Figma team page in the browser. The URL will be like figma.com/files/team/{team_id}/Team-Name. Copy the numeric team_id and enter it in the Team ID field below. This is needed to list projects for the project picker.",
+      },
+      {
         step: "Enter credentials below",
         detail:
-          "Fill in: Personal Access Token, Webhook Passcode, and Admin Secret. Additionally, set FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET via wrangler secret put on the connector worker.",
+          "Fill in: Personal Access Token, Webhook Passcode, Team ID, and Admin Secret. Additionally, set FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET via wrangler secret put on the connector worker.",
       },
       {
         step: "Initiate OAuth (recommended)",
@@ -624,6 +633,206 @@ function SyncResultDetails({ source, result }: { source: string; result: SyncRes
 }
 
 // ---------------------------------------------------------------------------
+// Project Picker (Figma)
+// ---------------------------------------------------------------------------
+
+function FilePickerSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [files, setFiles] = useState<FigmaFile[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [initialSelected, setInitialSelected] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+
+  const loadFiles = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<FigmaFilesResponse>(
+        `connections/${source}/projects`,
+      );
+      if (!data.ok) {
+        setError(data.error || "Failed to load files");
+        return;
+      }
+      setFiles(data.files);
+      const sel = new Set(data.selected);
+      setSelected(sel);
+      setInitialSelected(new Set(sel));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load files");
+    } finally {
+      setLoading(false);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && files.length === 0 && !loading && !error) {
+      loadFiles();
+    }
+  }, [expanded, files.length, loading, error, loadFiles]);
+
+  const hasChanges = useMemo(() => {
+    if (selected.size !== initialSelected.size) return true;
+    for (const key of selected) {
+      if (!initialSelected.has(key)) return true;
+    }
+    return false;
+  }, [selected, initialSelected]);
+
+  function toggleFile(fileKey: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileKey)) next.delete(fileKey);
+      else next.add(fileKey);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.put(`connections/${source}/projects`, {
+        fileKeys: [...selected],
+      });
+      setInitialSelected(new Set(selected));
+    } catch (err) {
+      console.error("Failed to save file selection:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filtered = files.filter((f) =>
+    f.name.toLowerCase().includes(filter.toLowerCase()) ||
+    f.projectName.toLowerCase().includes(filter.toLowerCase()),
+  );
+
+  // Group by project for display
+  const grouped = useMemo(() => {
+    const groups: Record<string, { projectName: string; files: FigmaFile[] }> = {};
+    for (const f of filtered) {
+      if (!groups[f.projectId]) {
+        groups[f.projectId] = { projectName: f.projectName, files: [] };
+      }
+      groups[f.projectId].files.push(f);
+    }
+    return Object.entries(groups);
+  }, [filtered]);
+
+  return (
+    <Card>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-6 py-4 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Watched Files</span>
+          <span className="text-xs text-muted-foreground">
+            {selected.size > 0
+              ? `${selected.size} file${selected.size > 1 ? "s" : ""} selected`
+              : "Select which Figma files to monitor"}
+          </span>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+      {expanded && (
+        <CardContent className="space-y-4 pt-0">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading files from Figma...</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+              <p className="text-sm text-destructive">{error}</p>
+              {error.includes("Team ID") && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Set the Team ID in the Configuration section above, then try
+                  again.
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              {files.length > 5 && (
+                <Input
+                  placeholder="Filter files..."
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="text-sm"
+                />
+              )}
+              <div className="max-h-72 space-y-3 overflow-y-auto">
+                {grouped.map(([projectId, group]) => (
+                  <div key={projectId}>
+                    {grouped.length > 1 && (
+                      <p className="mb-1 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        {group.projectName}
+                      </p>
+                    )}
+                    <div className="space-y-1">
+                      {group.files.map((file) => (
+                        <label
+                          key={file.key}
+                          className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={selected.has(file.key)}
+                            onCheckedChange={() => toggleFile(file.key)}
+                          />
+                          <span className="text-sm">{file.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {filtered.length === 0 && (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    {files.length === 0
+                      ? "No files found"
+                      : "No matches"}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between pt-2">
+                <p className="text-xs text-muted-foreground">
+                  {selected.size === 0
+                    ? "No files selected — all files will be monitored"
+                    : `${selected.size} of ${files.length} files will be monitored`}
+                </p>
+                <Button
+                  onClick={handleSave}
+                  disabled={!hasChanges || saving}
+                  size="sm"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      Save Selection
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ConnectionDetail
 // ---------------------------------------------------------------------------
 
@@ -816,6 +1025,11 @@ export function ConnectionDetail() {
           onToggleReveal={toggleReveal}
           onSave={handleSave}
         />
+      )}
+
+      {/* File Picker (Figma only) */}
+      {source === "figma" && adminSecretConfigured && (
+        <FilePickerSection source={source} />
       )}
 
       {/* Recent Events */}

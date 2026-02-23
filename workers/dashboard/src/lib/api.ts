@@ -116,6 +116,21 @@ export interface SyncResult {
   detail?: string;
 }
 
+export interface FigmaFile {
+  key: string;
+  name: string;
+  projectId: string;
+  projectName: string;
+}
+
+export interface FigmaFilesResponse {
+  ok: boolean;
+  teamId?: string;
+  files: FigmaFile[];
+  selected: string[];
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
 // API helper
 // ---------------------------------------------------------------------------
