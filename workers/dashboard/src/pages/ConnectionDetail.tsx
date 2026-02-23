@@ -408,17 +408,6 @@ function SetupGuideContent({ guide }: { guide: SetupGuideData }) {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1">
-        <button
-          onClick={() => setActiveTab("manual")}
-          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-            activeTab === "manual"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <BookOpen className="h-3 w-3" />
-          Manual Setup
-        </button>
         {guide.claudeCode && (
           <button
             onClick={() => setActiveTab("claude")}
@@ -432,6 +421,17 @@ function SetupGuideContent({ guide }: { guide: SetupGuideData }) {
             Claude Code
           </button>
         )}
+        <button
+          onClick={() => setActiveTab("manual")}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            activeTab === "manual"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <BookOpen className="h-3 w-3" />
+          Manual Setup
+        </button>
       </div>
 
       {activeTab === "manual" ? (

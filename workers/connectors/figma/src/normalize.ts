@@ -108,6 +108,55 @@ export function normalizeWebhookEvent(
       break;
     }
 
+    case "FILE_UPDATE": {
+      // Fires after ~30 minutes of editing inactivity — debounced autosave notification
+      // No triggered_by field in payload, so actor is unknown
+      const fileName = payload.file_name || "untitled";
+      events.push({
+        id: generateULID(),
+        timestamp: payload.timestamp,
+        ingestedAt: new Date().toISOString(),
+        source: "figma",
+        eventType: "file.edited",
+        scope: {
+          org: "figma",
+          project: fileName,
+          actor: "unknown",
+        },
+        payload: {
+          fileKey: payload.file_key,
+          fileName,
+        },
+        summary: `"${fileName}" was updated`,
+        tags: ["design-update", "autosave"],
+      });
+      break;
+    }
+
+    case "FILE_DELETE": {
+      const actor = payload.triggered_by?.handle || "unknown";
+      const fileName = payload.file_name || "untitled";
+      events.push({
+        id: generateULID(),
+        timestamp: payload.timestamp,
+        ingestedAt: new Date().toISOString(),
+        source: "figma",
+        eventType: "file.deleted",
+        scope: {
+          org: "figma",
+          project: fileName,
+          actor,
+        },
+        payload: {
+          fileKey: payload.file_key,
+          fileName,
+        },
+        summary: `${actor} deleted "${fileName}"`,
+        tags: ["design-update"],
+      });
+      break;
+    }
+
     case "LIBRARY_PUBLISH": {
       const actor = payload.triggered_by?.handle || "unknown";
       const libName = payload.library_name || payload.file_name || "untitled library";
