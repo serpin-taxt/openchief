@@ -23,6 +23,7 @@ import {
   TrendingUp,
   FlaskConical,
   Palette,
+  Wand2,
 } from "lucide-react";
 import type { AgentDefinition } from "@openchief/shared";
 import type { ConnectionStatus, CurrentUser } from "@/lib/api";
@@ -161,7 +162,7 @@ export function AppSidebar({
   const execAgents = agents.filter((a) => a.visibility === "exec");
   const teamAgents = agents.filter((a) => a.visibility !== "exec");
 
-  const anyAgentActive = agents.some((a) => isActive(`/modules/${a.id}`));
+  const anyAgentActive = agents.some((a) => isActive(`/agents/${a.id}`));
   const anyConnectionActive = connections.some((c) => isActive(`/connections/${c.source}`));
 
   const [agentsOpen, setAgentsOpen] = useState(
@@ -234,10 +235,10 @@ export function AppSidebar({
                   return (
                     <NavItem
                       key={agent.id}
-                      to={`/modules/${agent.id}`}
+                      to={`/agents/${agent.id}`}
                       icon={<Icon className="h-4 w-4" />}
                       label={agent.name}
-                      active={isActive(`/modules/${agent.id}`)}
+                      active={isActive(`/agents/${agent.id}`)}
                       collapsed={collapsed}
                     />
                   );
@@ -254,10 +255,10 @@ export function AppSidebar({
               return (
                 <NavItem
                   key={agent.id}
-                  to={`/modules/${agent.id}`}
+                  to={`/agents/${agent.id}`}
                   icon={<Icon className="h-4 w-4" />}
                   label={agent.name}
-                  active={isActive(`/modules/${agent.id}`)}
+                  active={isActive(`/agents/${agent.id}`)}
                   collapsed={collapsed}
                 />
               );
@@ -314,6 +315,13 @@ export function AppSidebar({
                 )}
               </div>
             )}
+            <NavItem
+              to="/tools"
+              icon={<Wand2 className="h-4 w-4" />}
+              label="Tools"
+              active={isActive("/tools")}
+              collapsed={collapsed}
+            />
           </>
         )}
 

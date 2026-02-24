@@ -237,7 +237,7 @@ function ConsumersCard({
       <CardFooter className="pt-1 pb-0 px-4">
         <div className="flex flex-wrap gap-1">
           {agents.slice(0, 5).map((a) => (
-            <Link key={a.id} to={`/modules/${a.id}`}>
+            <Link key={a.id} to={`/agents/${a.id}`}>
               <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-accent">
                 {a.name}
               </Badge>

@@ -801,6 +801,30 @@ export default {
       }
 
       // -----------------------------------------------------------------------
+      // Tools (superadmin only)
+      // -----------------------------------------------------------------------
+
+      if (path.startsWith("/api/tools")) {
+        const toolsEmail = await getUserEmail(request, env);
+        const toolsRole = await getUserRole(toolsEmail, env);
+        if (toolsRole !== "superadmin") {
+          return errorJson("Superadmin access required", 403);
+        }
+      }
+
+      if (method === "GET" && path === "/api/tools/slack-message-counts") {
+        return handleSlackMessageCounts(env);
+      }
+
+      if (method === "POST" && path === "/api/tools/refresh-slack") {
+        return handleRefreshSlack(env);
+      }
+
+      if (method === "POST" && path === "/api/tools/generate-voice") {
+        return handleGenerateVoice(request, env);
+      }
+
+      // -----------------------------------------------------------------------
       // 404
       // -----------------------------------------------------------------------
       return errorJson("Not found", 404);
@@ -2472,4 +2496,196 @@ async function handleUpdateModel(
     .run();
 
   return json({ jobType, model: body.model, updatedAt: now });
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/tools/generate-voice
+// ---------------------------------------------------------------------------
+async function handleGenerateVoice(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const body = (await request.json()) as { identityId: string };
+
+  if (!body.identityId) {
+    return errorJson("identityId is required");
+  }
+
+  // Load identity to get display name and real name
+  const identity = await env.DB.prepare(
+    "SELECT id, display_name, real_name, slack_user_id FROM identity_mappings WHERE id = ?",
+  )
+    .bind(body.identityId)
+    .first<{
+      id: string;
+      display_name: string | null;
+      real_name: string | null;
+      slack_user_id: string | null;
+    }>();
+
+  if (!identity) {
+    return errorJson("Identity not found", 404);
+  }
+
+  const personName = identity.display_name || identity.real_name || "Unknown";
+
+  // Build name matching — scope_actor can be either display_name or real_name
+  const possibleNames = [identity.display_name, identity.real_name].filter(
+    (n): n is string => !!n,
+  );
+
+  if (possibleNames.length === 0) {
+    return errorJson(
+      "No name found for this identity — cannot match Slack messages",
+    );
+  }
+
+  // Query Slack messages from the last 30 days by scope_actor
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const placeholders = possibleNames.map(() => "scope_actor = ?").join(" OR ");
+  const { results: messageRows } = await env.DB.prepare(
+    `SELECT payload, timestamp FROM events
+     WHERE source = 'slack'
+       AND event_type LIKE 'message.%'
+       AND (${placeholders})
+       AND timestamp >= ?
+     ORDER BY timestamp DESC
+     LIMIT 500`,
+  )
+    .bind(...possibleNames, thirtyDaysAgo)
+    .all<{ payload: string; timestamp: string }>();
+
+  if (!messageRows || messageRows.length === 0) {
+    return errorJson(
+      `No Slack messages found for "${personName}" in the last 30 days. Make sure the Slack connector is active and has ingested recent messages. Try clicking "Refresh Slack Data" first.`,
+      404,
+    );
+  }
+
+  // Extract text from each message payload
+  const messages: string[] = [];
+  let oldestTs: string | null = null;
+  let newestTs: string | null = null;
+  for (const row of messageRows) {
+    try {
+      const payload = JSON.parse(row.payload) as { text?: string };
+      if (payload.text && typeof payload.text === "string" && payload.text.trim()) {
+        messages.push(payload.text.trim());
+        if (!newestTs) newestTs = row.timestamp;
+        oldestTs = row.timestamp;
+      }
+    } catch {
+      // Skip malformed payloads
+    }
+  }
+
+  if (messages.length < 10) {
+    return errorJson(
+      `Only ${messages.length} Slack messages with text found for "${personName}" in the last 30 days. Need at least 10 for meaningful analysis. Try clicking "Refresh Slack Data" to pull the latest messages.`,
+    );
+  }
+
+  // Proxy to runtime worker for Claude analysis
+  const runtimeResponse = await env.AGENT_RUNTIME.fetch(
+    "https://openchief-runtime/tools/generate-voice",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ personName, messages }),
+    },
+  );
+
+  // Enrich runtime response with date range info
+  const runtimeData = await runtimeResponse.text();
+  if (runtimeResponse.status === 200) {
+    try {
+      const parsed = JSON.parse(runtimeData);
+      return json({
+        ...parsed,
+        dateRange: { oldest: oldestTs, newest: newestTs },
+      });
+    } catch {
+      // fall through
+    }
+  }
+
+  return new Response(runtimeData, {
+    status: runtimeResponse.status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/tools/slack-message-counts
+// ---------------------------------------------------------------------------
+async function handleSlackMessageCounts(env: Env): Promise<Response> {
+  // Count Slack messages per scope_actor from last 30 days
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { results } = await env.DB.prepare(
+    `SELECT scope_actor AS name, COUNT(*) AS count
+     FROM events
+     WHERE source = 'slack'
+       AND event_type LIKE 'message.%'
+       AND scope_actor IS NOT NULL
+       AND scope_actor != ''
+       AND timestamp >= ?
+     GROUP BY scope_actor
+     ORDER BY count DESC`,
+  )
+    .bind(thirtyDaysAgo)
+    .all<{ name: string; count: number }>();
+
+  // Also get total Slack event count (any type) for the "has data" check
+  const total = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM events WHERE source = 'slack'`,
+  ).first<{ count: number }>();
+
+  return json({
+    totalSlackEvents: total?.count ?? 0,
+    messageCounts: results ?? [],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/tools/refresh-slack
+// ---------------------------------------------------------------------------
+async function handleRefreshSlack(env: Env): Promise<Response> {
+  // Trigger a fresh Slack poll to ingest the latest messages into D1
+  const binding = env["CONNECTOR_SLACK" as keyof Env] as Fetcher | undefined;
+  if (!binding) {
+    return errorJson(
+      "Slack connector is not configured. Add it from the Connections page first.",
+      400,
+    );
+  }
+
+  const adminSecret = await env.KV.get("connector-secret:slack:ADMIN_SECRET");
+  const headers: Record<string, string> = {};
+  if (adminSecret) headers["Authorization"] = `Bearer ${adminSecret}`;
+
+  try {
+    const resp = await binding.fetch("https://connector/poll", {
+      method: "POST",
+      headers,
+    });
+    const body = await resp.text();
+
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Slack connector returned ${resp.status}`, detail: body },
+        resp.status,
+      );
+    }
+
+    let result: unknown;
+    try {
+      result = JSON.parse(body);
+    } catch {
+      result = { raw: body };
+    }
+    return json({ ok: true, ...((result && typeof result === "object") ? result : { result }) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return json({ ok: false, error: `Failed to reach Slack connector: ${msg}` }, 500);
+  }
 }

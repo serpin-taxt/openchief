@@ -80,7 +80,7 @@ export function ReportView() {
           Dashboard
         </Link>
         <ChevronRight className="h-3 w-3" />
-        <Link to={`/modules/${id}`} className="hover:text-foreground">
+        <Link to={`/agents/${id}`} className="hover:text-foreground">
           {agent?.name ?? id}
         </Link>
         <ChevronRight className="h-3 w-3" />

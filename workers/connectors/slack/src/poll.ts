@@ -258,7 +258,8 @@ export interface DeepBackfillResult {
  * Each invocation processes as many channels as it can within ~25s.
  */
 export async function runDeepBackfill(
-  env: PollEnv
+  env: PollEnv,
+  oldest?: string,
 ): Promise<DeepBackfillResult> {
   const startTime = Date.now();
   const workspaceName = await getWorkspaceName(env);
@@ -325,6 +326,7 @@ export async function runDeepBackfill(
         env.SLACK_BOT_TOKEN,
         ch.id,
         {
+          oldest,
           paginationCursor: existingPageCursor || undefined,
           maxPages: 5,
         }

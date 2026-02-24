@@ -173,6 +173,88 @@ export default {
       });
     }
 
+    // POST /tools/generate-voice — analyze messages and generate voice profile
+    if (path === "/tools/generate-voice" && request.method === "POST") {
+      const body = (await request.json()) as {
+        personName: string;
+        messages: string[];
+      };
+
+      if (!body.personName || !body.messages || body.messages.length === 0) {
+        return Response.json(
+          { error: "personName and messages are required" },
+          { status: 400 },
+        );
+      }
+
+      const apiKey = env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        return Response.json(
+          { error: "ANTHROPIC_API_KEY not configured" },
+          { status: 500 },
+        );
+      }
+
+      const { callClaude } = await import("./claude-client");
+      const model = env.DEFAULT_MODEL || "claude-sonnet-4-6";
+
+      const systemPrompt = `You are an expert at analyzing communication styles and writing patterns.
+You will receive a collection of Slack messages written by a single person named "${body.personName}".
+Analyze their writing style and produce a voice profile.
+
+You must output ONLY valid JSON matching this exact shape:
+{
+  "voice": "...",
+  "personality": "...",
+  "outputStyle": "..."
+}
+
+Field guidelines:
+- voice (2-4 sentences): HOW this person communicates — vocabulary choices, sentence structure, cadence, verbal habits, catchphrases, and tone. Be specific and cite patterns from their messages.
+- personality (2-4 sentences): WHO this person is based on their writing — temperament, values, priorities, humor style, communication preferences, and interpersonal approach. Infer from patterns, not individual messages.
+- outputStyle (1-2 sentences): How this person would FORMAT and PRESENT information in reports. E.g., "Direct and data-driven with bullet points" or "Narrative and conversational with context-setting before conclusions."
+
+Be specific and evidence-based. Capture distinctive traits that differentiate this person from others. If messages are too few or generic to identify clear patterns, say so honestly in each field.`;
+
+      const userPrompt = `Here are ${body.messages.length} Slack messages from ${body.personName}:\n\n${body.messages.map((msg, i) => `[${i + 1}] ${msg}`).join("\n\n")}\n\nAnalyze these messages and generate the voice profile JSON.`;
+
+      try {
+        const result = await callClaude(
+          apiKey,
+          systemPrompt,
+          [{ role: "user", content: userPrompt }],
+          model,
+          2048,
+        );
+
+        // Parse the JSON response
+        const cleaned = result.text
+          .replace(/```json\s*/g, "")
+          .replace(/```\s*/g, "")
+          .trim();
+        const parsed = JSON.parse(cleaned) as {
+          voice: string;
+          personality: string;
+          outputStyle: string;
+        };
+
+        return Response.json({
+          voice: parsed.voice,
+          personality: parsed.personality,
+          outputStyle: parsed.outputStyle,
+          messageCount: body.messages.length,
+          model,
+          tokens: { input: result.inputTokens, output: result.outputTokens },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        return Response.json(
+          { error: `Voice generation failed: ${msg}` },
+          { status: 500 },
+        );
+      }
+    }
+
     return Response.json({ error: "Not found" }, { status: 404 });
   },
 };

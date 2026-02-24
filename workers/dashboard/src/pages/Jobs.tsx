@@ -216,7 +216,7 @@ export function Jobs() {
                     <TableRow key={triggerKey}>
                       <TableCell>
                         <Link
-                          to={`/modules/${job.agentId}`}
+                          to={`/agents/${job.agentId}`}
                           className="font-medium hover:underline"
                         >
                           {job.agentName}
@@ -284,7 +284,7 @@ export function Jobs() {
                         )}
                         {report.completed && report.reportId && (
                           <Link
-                            to={`/modules/${job.agentId}/reports/${report.reportId}`}
+                            to={`/agents/${job.agentId}/reports/${report.reportId}`}
                           >
                             <Button variant="ghost" size="sm">
                               View
