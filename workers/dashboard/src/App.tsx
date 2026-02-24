@@ -28,15 +28,20 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/agents/:id" element={<AgentDetail />} />
+            <Route path="/agents/:id/history" element={<AgentHistory />} />
+            <Route
+              path="/agents/:id/reports/:reportId"
+              element={<ReportView />}
+            />
+            {/* Legacy /modules routes → redirect to /agents */}
             <Route
               path="/modules"
               element={<Navigate to="/agents" replace />}
             />
-            <Route path="/modules/:id" element={<AgentDetail />} />
-            <Route path="/modules/:id/history" element={<AgentHistory />} />
             <Route
-              path="/modules/:id/reports/:reportId"
-              element={<ReportView />}
+              path="/modules/:id/*"
+              element={<Navigate to="/agents" replace />}
             />
             {/* Superadmin only */}
             <Route element={<RequireRole minRole="superadmin" />}>

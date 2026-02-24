@@ -113,7 +113,7 @@ function AgentCard({ agent }: { agent: AgentWithReport }) {
   const healthSignal = report?.content?.healthSignal ?? null;
 
   return (
-    <Link to={`/modules/${agent.id}`} className="group">
+    <Link to={`/agents/${agent.id}`} className="group">
       <Card className="relative h-full overflow-hidden transition-shadow hover:shadow-md">
         {agent.avatarUrl && (
           <div className="absolute inset-0 pointer-events-none">

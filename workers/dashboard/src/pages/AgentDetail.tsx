@@ -411,7 +411,7 @@ export function AgentDetail() {
               e.target.value = "";
             }}
           />
-          <Link to={`/modules/${id}/history`}>
+          <Link to={`/agents/${id}/history`}>
             <Button variant="outline" size="sm" className="border-border bg-card">
               <History className="mr-1.5 h-3.5 w-3.5" />
               History
@@ -430,7 +430,7 @@ export function AgentDetail() {
         return (
           <section className="relative">
             <h2 className="mb-3 text-lg font-medium">Latest Report</h2>
-            <Link to={`/modules/${id}/reports/${latest.id}`}>
+            <Link to={`/agents/${id}/reports/${latest.id}`}>
               <div className={cn("flex items-start gap-3 rounded-lg border border-border p-4 transition-all", borderClass, bgClass)}>
                 <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", dotClass)} />
                 <div className="min-w-0 flex-1">
@@ -843,7 +843,7 @@ export function AgentDetail() {
                 return (
                   <Link
                     key={report.id}
-                    to={`/modules/${id}/reports/${report.id}`}
+                    to={`/agents/${id}/reports/${report.id}`}
                     className="block rounded-lg border border-border p-3 transition-colors hover:bg-secondary/50"
                   >
                     <div className="flex items-start gap-2.5">
@@ -888,7 +888,7 @@ export function AgentDetail() {
                       </TableCell>
                       <TableCell>
                         <Link
-                          to={`/modules/${id}/reports/${report.id}`}
+                          to={`/agents/${id}/reports/${report.id}`}
                           className="font-medium hover:underline"
                         >
                           {report.content?.headline ?? "Untitled report"}

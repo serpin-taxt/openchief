@@ -154,7 +154,7 @@ function AgentCard({ agent }: { agent: AgentWithReports }) {
   const dotColor = healthSignal ? (healthDotColor[healthSignal] ?? "bg-muted-foreground/50") : "bg-muted-foreground/30";
 
   return (
-    <Link to={`/modules/${agent.id}`}>
+    <Link to={`/agents/${agent.id}`}>
       <Card className={cn("relative h-full overflow-hidden transition-all hover:shadow-md", healthSignal ? healthBorder[healthSignal] : "")}>
         {agent.avatarUrl && (
           <div className="absolute inset-0 pointer-events-none">
