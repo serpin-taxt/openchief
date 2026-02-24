@@ -25,7 +25,7 @@
       {
         "reportType": "daily-meeting",
         "cadence": "daily",
-        "sections": ["strategic-priorities", "cross-functional-themes", "risks-and-opportunities", "decisions-needed", "directives"]
+        "sections": ["meeting-transcript", "strategic-priorities", "daily-focus", "cross-functional-synergies", "action-items"]
       }
     ]
   },
