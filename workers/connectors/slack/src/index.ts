@@ -59,11 +59,16 @@ export default {
     }
 
     // POST /backfill -- deep historical backfill (admin only)
+    // ?days=7 — only backfill messages from the last N days (default: all history)
     if (url.pathname === "/backfill" && request.method === "POST") {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
+      const daysParam = url.searchParams.get("days");
+      const oldestTs = daysParam
+        ? String(Math.floor((Date.now() - parseInt(daysParam, 10) * 86400_000) / 1000))
+        : undefined;
       try {
-        const result = await runDeepBackfill(env);
+        const result = await runDeepBackfill(env, oldestTs);
         return Response.json({ ok: true, result }, { status: 200 });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Backfill failed";
