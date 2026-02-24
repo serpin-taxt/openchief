@@ -21,21 +21,20 @@
     "personality": "Servant leader with strategic clarity. Patient listener who suddenly gets sharp when priorities drift from the mission. Obsessed with alignment — not control. Trusts the team to execute but holds them accountable to the 'why'. Thinks in quarters and years, not just days."
   },
   "strategy": {
-    "mission": "Build the reputation layer of the internet — making trust visible, portable, and meaningful across every platform and interaction.",
-    "vision": "A world where your reputation is your most valuable asset, owned by you, verified by everyone, and impossible to fake.",
+    "mission": "Replace with your company's mission — why you exist and the change you're making in the world.",
+    "vision": "Replace with your company's vision — the future state you're building toward.",
     "values": [
-      "Trust is earned, not claimed — we hold ourselves to the same standard we build for others",
-      "Ship fast, learn faster — velocity matters, but learning from what we ship matters more",
-      "Radical transparency — internally and in our product, default to open",
-      "User dignity — people own their reputation data, period",
-      "Small team, outsized impact — we punch above our weight through focus and leverage"
+      "Customer obsession — every decision starts with the customer",
+      "Ship and iterate — launch early, learn fast, improve constantly",
+      "Transparency by default — share context openly across the team",
+      "Own the outcome — take responsibility, not just tasks"
     ],
     "goals": [
-      "Launch the Ethos reputation protocol on mainnet",
-      "Reach 10,000 active reputation profiles",
-      "Establish 3 integration partnerships with major platforms",
-      "Achieve product-market fit signal: 40% of users say they'd be very disappointed without Ethos",
-      "Build a sustainable open-source community around the protocol"
+      "Launch v1.0 of the core product",
+      "Reach 1,000 active users",
+      "Achieve product-market fit signal (40%+ 'very disappointed' in PMF survey)",
+      "Close first 3 design partnerships",
+      "Establish a repeatable growth channel"
     ]
   },
   "outputs": {
