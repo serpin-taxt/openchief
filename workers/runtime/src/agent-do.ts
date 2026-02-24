@@ -863,6 +863,29 @@ export class AgentDurableObject extends DurableObject<Env> {
     config: AgentDefinition,
     asOf?: string
   ): Promise<AgentReport | null> {
+    // Dedup guard: Cloudflare DO alarms have at-least-once delivery, so
+    // the alarm handler can fire twice.  Skip if we already generated this
+    // exact report type within the last 30 minutes (unless this is a manual
+    // trigger via asOf which explicitly requests re-generation).
+    if (!asOf) {
+      const thirtyMinAgo = new Date(
+        Date.now() - 30 * 60 * 1000
+      ).toISOString();
+      const existing = await this.env.DB.prepare(
+        `SELECT id FROM reports
+         WHERE agent_id = ? AND report_type = ? AND created_at > ?
+         LIMIT 1`
+      )
+        .bind(config.id, reportConfig.reportType, thirtyMinAgo)
+        .first<{ id: string }>();
+      if (existing) {
+        console.log(
+          `Dedup: skipping ${reportConfig.reportType} for ${config.id} — report ${existing.id} already exists within 30 min window`
+        );
+        return null;
+      }
+    }
+
     const eventLimit = 2000;
     const anchorDay = new Date(
       asOf ? asOf + "T23:59:59-06:00" : Date.now()

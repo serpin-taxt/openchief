@@ -1,6 +1,7 @@
 /**
- * Simple Claude API wrapper.
- * Calls the Anthropic Messages API and returns the text + token counts.
+ * Claude API wrapper using streaming to avoid Cloudflare 524 timeouts.
+ * Uses the Anthropic Messages API with SSE streaming, accumulating the
+ * response text and token counts from the stream events.
  */
 
 /** Sanitize Unicode: remove lone surrogates that break JSON.stringify */
@@ -14,7 +15,7 @@ export async function callClaude(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   model = "claude-sonnet-4-6",
   maxTokens = 8192,
-  options?: { extendedContext?: boolean }
+  _options?: { extendedContext?: boolean }
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -22,17 +23,13 @@ export async function callClaude(
     "anthropic-version": "2023-06-01",
   };
 
-  // Enable 1M context window (beta) — requires usage tier 4+
-  if (options?.extendedContext) {
-    headers["anthropic-beta"] = "context-1m-2025-08-07";
-  }
-
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
+      stream: true,
       system: systemPrompt,
       messages,
     }),
@@ -43,19 +40,55 @@ export async function callClaude(
     throw new Error(`Claude API error (${response.status}): ${error}`);
   }
 
-  const result = (await response.json()) as {
-    content: Array<{ type: string; text?: string }>;
-    usage: { input_tokens: number; output_tokens: number };
-  };
+  if (!response.body) {
+    throw new Error("Claude API returned no response body");
+  }
 
-  const text = result.content
-    .filter((b) => b.type === "text" && b.text)
-    .map((b) => sanitizeUnicode(b.text!))
-    .join("");
+  // Read the SSE stream and accumulate text + usage data
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let fullText = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") continue;
+
+      try {
+        const event = JSON.parse(data) as {
+          type: string;
+          delta?: { type: string; text?: string };
+          message?: { usage?: { input_tokens: number; output_tokens: number } };
+          usage?: { input_tokens?: number; output_tokens?: number };
+        };
+
+        if (event.type === "content_block_delta" && event.delta?.text) {
+          fullText += event.delta.text;
+        } else if (event.type === "message_start" && event.message?.usage) {
+          inputTokens = event.message.usage.input_tokens || 0;
+        } else if (event.type === "message_delta" && event.usage) {
+          outputTokens = event.usage.output_tokens || 0;
+        }
+      } catch {
+        // Skip malformed JSON lines
+      }
+    }
+  }
 
   return {
-    text,
-    inputTokens: result.usage.input_tokens,
-    outputTokens: result.usage.output_tokens,
+    text: sanitizeUnicode(fullText),
+    inputTokens,
+    outputTokens,
   };
 }

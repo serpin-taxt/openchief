@@ -60,14 +60,24 @@ export default {
       const [, agentId, reportType] = triggerMatch;
       const asOf = url.searchParams.get("asOf") || undefined;
 
-      const doId = env.AGENT_DO.idFromName(agentId);
-      const stub = env.AGENT_DO.get(doId);
-      const report = await stub.triggerReport(reportType, agentId, asOf);
+      try {
+        const doId = env.AGENT_DO.idFromName(agentId);
+        const stub = env.AGENT_DO.get(doId);
+        const report = await stub.triggerReport(reportType, agentId, asOf);
 
-      if (!report) {
-        return Response.json({ error: "No report generated" }, { status: 404 });
+        if (!report) {
+          return Response.json({ error: "No report generated" }, { status: 404 });
+        }
+        return Response.json(report);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        console.error(`Trigger failed for ${agentId}/${reportType}:`, err);
+        return Response.json(
+          { error: message, stack, agentId, reportType },
+          { status: 500 }
+        );
       }
-      return Response.json(report);
     }
 
     // POST /chat/:agentId — streaming chat
