@@ -22,8 +22,8 @@ Data Sources          Connectors         Event Router        Agent Runtime      
 
 1. **Connectors** receive webhooks or poll APIs, normalize events into a common format
 2. **Event Router** resolves identities across platforms and persists events to D1
-3. **Agent Runtime** uses Durable Objects to run each agent on a schedule — feeding events to Claude and storing structured reports
-4. **Dashboard** displays reports, health signals, and lets you chat with any agent
+3. **Agent Runtime** uses Durable Objects to run each agent on a schedule — feeding events to Claude and storing structured reports. Agents can also propose and execute tasks autonomously.
+4. **Dashboard** displays reports, health signals, tasks, and lets you chat with any agent
 
 ## Quick Start
 
@@ -111,7 +111,7 @@ OpenChief ships with 15 ready-to-use agents. All agents are seeded by default �
 
 | Agent | Watches | Focus | Visibility |
 |-------|---------|-------|------------|
-| **CEO** | All sources | Executive synthesis, cross-functional signals | Exec |
+| **CEO** | All sources | Executive synthesis, cross-functional signals, task prioritization | Exec |
 | **CFO** | QuickBooks + Slack | Burn rate, runway, budget utilization | Exec |
 | **CPO** | Slack + GitHub | Team sentiment, hiring, onboarding | Exec |
 | **CRO** | Amplitude + Slack | Revenue growth, conversion funnels | Exec |
@@ -153,6 +153,34 @@ The **Team page** (`/team`) shows all people and bots discovered across your con
 - **Merge** duplicate identities (select two → merge into one)
 - **Hide** people who have left or are irrelevant (soft-hide, data preserved)
 - **Promote/demote** exec roles for access to private channel data
+
+### Task System (Experimental)
+
+OpenChief includes an autonomous task system that lets agents propose, prioritize, and execute work items. Tasks flow through a lifecycle managed by the CEO agent:
+
+```
+Agent generates report → proposes tasks
+  → CEO reviews in daily meeting → approves or cancels
+    → Assigned agent executes task autonomously
+      → Output stored and visible in dashboard
+```
+
+**How it works:**
+
+1. **Proposal** — During report generation, any agent can propose tasks based on what it observes (e.g., "audit PR review times" or "draft incident postmortem"). Proposals are extracted from the report and saved with status `proposed`.
+2. **Prioritization** — The CEO agent's daily meeting includes a task queue. The CEO approves tasks (moving them to `queued` with a priority) or cancels them.
+3. **Execution** — Every hour during business hours (8am–6pm weekdays), each agent checks for its highest-priority queued task and executes it autonomously using Claude. The output is a structured deliverable with a summary, content, and optional artifacts.
+4. **Dashboard** — The Tasks page (`/tasks`) shows all tasks with filtering by status, agent, and priority. Each task detail page renders the agent's output with markdown formatting.
+
+**Task statuses:** `proposed` → `queued` → `in_progress` → `completed` (or `cancelled`)
+
+**Manual trigger** (for testing):
+
+```bash
+curl -X POST https://your-runtime.workers.dev/trigger-task/eng-manager
+```
+
+The CEO agent also has a `query_tasks` chat tool, so you can ask it about the task queue in conversation.
 
 ### Create Your Own Agent
 
@@ -216,7 +244,7 @@ pnpm monorepo powered by Turborepo. Runs locally via `wrangler dev` or deployed 
 | `workers/router` | Queue Consumer | Event routing and identity resolution |
 | `workers/dashboard` | React + Tailwind v4 | Web UI for reports and agent management |
 | `workers/connectors/*` | Workers | One worker per data source (14 connectors) |
-| `migrations/` | D1 (SQLite) | 6 migration files |
+| `migrations/` | D1 (SQLite) | 7 migration files |
 | `agents/` | JSON configs | 15 agent definitions |
 
 ### Event Flow
