@@ -944,8 +944,11 @@ export class AgentDurableObject extends DurableObject<Env> {
       );
     }
 
-    const reportJobType =
-      reportConfig.cadence === "weekly" ? "weekly-report" : "daily-report";
+    const reportJobType = isCeoMeeting
+      ? "daily-meeting"
+      : reportConfig.cadence === "weekly"
+        ? "weekly-report"
+        : "daily-report";
     const modelSettings = await this.getModelSettings(reportJobType);
     const response = await callClaude(
       this.env.ANTHROPIC_API_KEY,
@@ -1219,6 +1222,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     const defaultModel = this.env.DEFAULT_MODEL || "claude-sonnet-4-6";
     const defaults: Record<string, { model: string; maxTokens: number }> = {
       "daily-report": { model: defaultModel, maxTokens: 8192 },
+      "daily-meeting": { model: defaultModel, maxTokens: 16384 },
       "weekly-report": { model: defaultModel, maxTokens: 8192 },
       chat: { model: defaultModel, maxTokens: 8192 },
     };
