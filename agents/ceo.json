@@ -46,6 +46,7 @@
       }
     ]
   },
+  "tools": ["query_events", "query_tasks"],
   "enabled": true,
   "visibility": "exec"
 }

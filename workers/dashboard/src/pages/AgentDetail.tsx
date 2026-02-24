@@ -23,6 +23,7 @@ import {
   Compass,
   Heart,
   Flag,
+  ListTodo,
 } from "lucide-react";
 import {
   BarChart,
@@ -285,6 +286,7 @@ export function AgentDetail() {
   const [agent, setAgent] = useState<AgentDefinition | null>(null);
   const [reports, setReports] = useState<AgentReport[]>([]);
   const [volumeData, setVolumeData] = useState<EventVolumeBucket[]>([]);
+  const [taskStats, setTaskStats] = useState<{ assigned: number; completed: number }>({ assigned: 0, completed: 0 });
   const [loading, setLoading] = useState(true);
   const [openDrawer, setOpenDrawer] = useState<CardId | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -320,12 +322,18 @@ export function AgentDetail() {
       setAgent(agentData);
       setAvatarUrl(agentData.avatarUrl ?? null);
 
-      const [reportList, volume] = await Promise.allSettled([
+      const [reportList, volume, assignedTasks, completedTasks] = await Promise.allSettled([
         api.get<AgentReport[]>(`agents/${id}/reports`),
         api.get<EventVolumeBucket[]>(`agents/${id}/events/volume`),
+        api.get<{ id: string }[]>(`tasks?assignedTo=${id}&status=queued&limit=100`),
+        api.get<{ id: string }[]>(`tasks?assignedTo=${id}&status=completed&limit=100`),
       ]);
       if (reportList.status === "fulfilled") setReports(reportList.value);
       if (volume.status === "fulfilled") setVolumeData(volume.value);
+      setTaskStats({
+        assigned: assignedTasks.status === "fulfilled" ? assignedTasks.value.length : 0,
+        completed: completedTasks.status === "fulfilled" ? completedTasks.value.length : 0,
+      });
     } catch (err) {
       console.error("Failed to load agent:", err);
     } finally {
@@ -446,6 +454,26 @@ export function AgentDetail() {
           </section>
         );
       })()}
+
+      {/* Task Stats */}
+      {(taskStats.assigned > 0 || taskStats.completed > 0) && (
+        <section className="relative">
+          <Link
+            to={`/tasks?assignedTo=${id}`}
+            className="flex items-center gap-3 rounded-lg border border-border p-4 transition-colors hover:border-ring hover:bg-secondary/50"
+          >
+            <ListTodo className="h-5 w-5 text-purple-400" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">Tasks</p>
+              <p className="text-xs text-muted-foreground">
+                {taskStats.assigned > 0 && `${taskStats.assigned} queued`}
+                {taskStats.assigned > 0 && taskStats.completed > 0 && " · "}
+                {taskStats.completed > 0 && `${taskStats.completed} completed`}
+              </p>
+            </div>
+          </Link>
+        </section>
+      )}
 
       {/* Charts Grid */}
       {reports.length > 0 && (

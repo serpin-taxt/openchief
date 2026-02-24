@@ -24,6 +24,7 @@ import {
   FlaskConical,
   Palette,
   Wand2,
+  ListTodo,
 } from "lucide-react";
 import type { AgentDefinition } from "@openchief/shared";
 import type { ConnectionStatus, CurrentUser } from "@/lib/api";
@@ -274,6 +275,13 @@ export function AppSidebar({
           icon={<Users className="h-4 w-4" />}
           label="Humans"
           active={isActive("/team")}
+          collapsed={collapsed}
+        />
+        <NavItem
+          to="/tasks"
+          icon={<ListTodo className="h-4 w-4" />}
+          label="Tasks"
+          active={isActive("/tasks")}
           collapsed={collapsed}
         />
 

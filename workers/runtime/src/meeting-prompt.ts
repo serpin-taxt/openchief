@@ -1,4 +1,4 @@
-import type { AgentDefinition, ReportConfig, AgentStrategy } from "@openchief/shared";
+import type { AgentDefinition, ReportConfig, AgentStrategy, Task } from "@openchief/shared";
 
 interface DailyReport {
   agentId: string;
@@ -16,13 +16,19 @@ interface DailyReport {
   };
 }
 
+export interface MeetingTaskData {
+  proposedTasks: Task[];
+  completedTasks: Task[];
+}
+
 export function buildMeetingPrompt(
   execConfig: AgentDefinition,
   agentConfigs: AgentDefinition[],
   dailyReports: DailyReport[],
   reportConfig: ReportConfig,
   previousMeetings: string[],
-  ragContext?: string
+  ragContext?: string,
+  taskData?: MeetingTaskData
 ): { system: string; user: string } {
   const system = buildMeetingSystemPrompt(
     execConfig,
@@ -32,7 +38,8 @@ export function buildMeetingPrompt(
   const user = buildMeetingUserPrompt(
     dailyReports,
     previousMeetings,
-    ragContext
+    ragContext,
+    taskData
   );
   return { system, user };
 }
@@ -140,8 +147,18 @@ Produce a JSON response with this exact structure:
   "actionItems": [
     { "description": "What to do", "priority": "low|medium|high|critical", "sourceUrl": "optional URL", "assignee": "optional person/department" }
   ],
+  "taskDecisions": [
+    { "taskId": "task-id-from-queue", "action": "queue|cancel", "priority": 0-100, "notes": "optional rationale" }
+  ],
   "healthSignal": "green|yellow|red"
 }
+
+TASK QUEUE RULES:
+- Review each proposed task in the TASK QUEUE section below
+- For each task, decide: "queue" (approve for execution) or "cancel" (reject)
+- When queuing, set priority 0-100 (higher = more urgent). Use the strategic goals to determine priority.
+- Include a brief note explaining your decision
+- If no tasks are in the queue, omit taskDecisions or use an empty array
 
 The sections should be:
 ${reportConfig.sections.map((s, i) => `${i + 1}. ${s}`).join("\n")}
@@ -170,7 +187,8 @@ Respond ONLY with valid JSON, no markdown code fences.`;
 function buildMeetingUserPrompt(
   dailyReports: DailyReport[],
   previousMeetings: string[],
-  ragContext?: string
+  ragContext?: string,
+  taskData?: MeetingTaskData
 ): string {
   const parts: string[] = [];
 
@@ -246,9 +264,50 @@ function buildMeetingUserPrompt(
     );
   }
 
+  // Task queue — proposed tasks awaiting CEO prioritization
+  if (taskData?.proposedTasks && taskData.proposedTasks.length > 0) {
+    parts.push("\n═══════════════════════════════════════════════════════════");
+    parts.push("TASK QUEUE — AWAITING YOUR PRIORITIZATION");
+    parts.push("For each task, decide: queue (approve with priority 0-100) or cancel.");
+    parts.push("═══════════════════════════════════════════════════════════");
+    for (const task of taskData.proposedTasks) {
+      const context = task.context
+        ? ` | Reasoning: ${task.context.reasoning}`
+        : "";
+      parts.push(
+        `\n[Task ID: ${task.id}]`
+      );
+      parts.push(`Title: ${task.title}`);
+      parts.push(`Description: ${task.description}`);
+      parts.push(`Proposed by: ${task.createdBy} → Assigned to: ${task.assignedTo || "unassigned"}`);
+      parts.push(`Current priority: ${task.priority}${context}`);
+    }
+    parts.push("");
+  }
+
+  // Recently completed tasks — for meeting context
+  if (taskData?.completedTasks && taskData.completedTasks.length > 0) {
+    parts.push("\n═══════════════════════════════════════════════════════════");
+    parts.push("RECENTLY COMPLETED TASKS");
+    parts.push("═══════════════════════════════════════════════════════════");
+    for (const task of taskData.completedTasks) {
+      const summary = task.output?.summary || "No summary available";
+      parts.push(
+        `\n[${task.title}] (by ${task.assignedTo || task.createdBy})`
+      );
+      parts.push(`Result: ${summary.slice(0, 800)}`);
+    }
+    parts.push("");
+  }
+
   parts.push(
     "\nNow facilitate the daily executive meeting. Listen to each department, ask how their work connects to our strategic goals, drive cross-functional discussion, and close with priorities mapped to goals."
   );
+  if (taskData?.proposedTasks && taskData.proposedTasks.length > 0) {
+    parts.push(
+      "Also review and prioritize the task queue — include taskDecisions in your JSON output for each proposed task."
+    );
+  }
   parts.push("\nRespond with JSON only.");
 
   return parts.join("\n");

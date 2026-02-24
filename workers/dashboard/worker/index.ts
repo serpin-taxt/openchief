@@ -801,6 +801,30 @@ export default {
       }
 
       // -----------------------------------------------------------------------
+      // Tasks
+      // -----------------------------------------------------------------------
+
+      if (method === "GET" && path === "/api/tasks/stats") {
+        return handleTaskStats(env);
+      }
+
+      if (method === "GET" && path === "/api/tasks") {
+        return handleListTasks(request, env);
+      }
+
+      if (method === "POST" && path === "/api/tasks") {
+        return handleCreateTask(request, env);
+      }
+
+      const taskDetailMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
+      if (taskDetailMatch && method === "GET") {
+        return handleGetTask(env, decodeURIComponent(taskDetailMatch[1]));
+      }
+      if (taskDetailMatch && method === "PUT") {
+        return handleUpdateTask(request, env, decodeURIComponent(taskDetailMatch[1]));
+      }
+
+      // -----------------------------------------------------------------------
       // Tools (superadmin only)
       // -----------------------------------------------------------------------
 
@@ -2496,6 +2520,192 @@ async function handleUpdateModel(
     .run();
 
   return json({ jobType, model: body.model, updatedAt: now });
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+function rowToTask(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    createdBy: row.created_by,
+    assignedTo: row.assigned_to,
+    sourceReportId: row.source_report_id,
+    output: row.output ? JSON.parse(row.output as string) : null,
+    context: row.context ? JSON.parse(row.context as string) : null,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    dueBy: row.due_by,
+    tokensUsed: row.tokens_used,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function handleListTasks(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const status = url.searchParams.get("status");
+  const assignedTo = url.searchParams.get("assignedTo");
+  const createdBy = url.searchParams.get("createdBy");
+  const limit = Math.min(
+    parseInt(url.searchParams.get("limit") || "50", 10),
+    100,
+  );
+
+  let sql = "SELECT * FROM tasks WHERE 1=1";
+  const params: unknown[] = [];
+
+  if (status) {
+    sql += " AND status = ?";
+    params.push(status);
+  }
+  if (assignedTo) {
+    sql += " AND assigned_to = ?";
+    params.push(assignedTo);
+  }
+  if (createdBy) {
+    sql += " AND created_by = ?";
+    params.push(createdBy);
+  }
+
+  sql += " ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'queued' THEN 1 WHEN 'proposed' THEN 2 WHEN 'completed' THEN 3 ELSE 4 END, priority DESC, created_at DESC LIMIT ?";
+  params.push(limit);
+
+  const { results } = await env.DB.prepare(sql)
+    .bind(...params)
+    .all();
+
+  return json((results ?? []).map((r) => rowToTask(r as Record<string, unknown>)));
+}
+
+async function handleGetTask(
+  env: Env,
+  taskId: string,
+): Promise<Response> {
+  const row = await env.DB.prepare("SELECT * FROM tasks WHERE id = ?")
+    .bind(taskId)
+    .first();
+
+  if (!row) return errorJson("Task not found", 404);
+  return json(rowToTask(row as Record<string, unknown>));
+}
+
+async function handleCreateTask(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const body = (await request.json()) as {
+    title?: string;
+    description?: string;
+    assignedTo?: string;
+    priority?: number;
+    dueBy?: string;
+  };
+
+  if (!body.title || !body.description) {
+    return errorJson("title and description are required");
+  }
+
+  const email = await getUserEmail(request, env);
+  const taskId = generateULID();
+  const now = new Date().toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO tasks (id, title, description, status, priority, created_by, assigned_to, due_by, created_at, updated_at)
+     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      taskId,
+      body.title,
+      body.description,
+      body.priority ?? 50,
+      `user:${email}`,
+      body.assignedTo || null,
+      body.dueBy || null,
+      now,
+      now,
+    )
+    .run();
+
+  return json({ id: taskId }, 201);
+}
+
+async function handleUpdateTask(
+  request: Request,
+  env: Env,
+  taskId: string,
+): Promise<Response> {
+  const existing = await env.DB.prepare("SELECT id FROM tasks WHERE id = ?")
+    .bind(taskId)
+    .first();
+  if (!existing) return errorJson("Task not found", 404);
+
+  const body = (await request.json()) as {
+    status?: string;
+    priority?: number;
+    assignedTo?: string;
+    dueBy?: string;
+  };
+
+  const updates: string[] = [];
+  const params: unknown[] = [];
+
+  if (body.status !== undefined) {
+    updates.push("status = ?");
+    params.push(body.status);
+    if (body.status === "completed") {
+      updates.push("completed_at = ?");
+      params.push(new Date().toISOString());
+    }
+    if (body.status === "in_progress") {
+      updates.push("started_at = ?");
+      params.push(new Date().toISOString());
+    }
+  }
+  if (body.priority !== undefined) {
+    updates.push("priority = ?");
+    params.push(body.priority);
+  }
+  if (body.assignedTo !== undefined) {
+    updates.push("assigned_to = ?");
+    params.push(body.assignedTo || null);
+  }
+  if (body.dueBy !== undefined) {
+    updates.push("due_by = ?");
+    params.push(body.dueBy || null);
+  }
+
+  if (updates.length === 0) {
+    return errorJson("No fields to update");
+  }
+
+  updates.push("updated_at = ?");
+  params.push(new Date().toISOString());
+  params.push(taskId);
+
+  await env.DB.prepare(
+    `UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`,
+  )
+    .bind(...params)
+    .run();
+
+  return json({ ok: true });
+}
+
+async function handleTaskStats(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    "SELECT status, COUNT(*) as count FROM tasks GROUP BY status",
+  ).all<{ status: string; count: number }>();
+
+  return json(results ?? []);
 }
 
 // ---------------------------------------------------------------------------

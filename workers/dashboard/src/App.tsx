@@ -17,6 +17,8 @@ import { PersonaGenerator } from "@/pages/PersonaGenerator";
 import { Team } from "@/pages/Team";
 import { Jobs } from "@/pages/Jobs";
 import { Models } from "@/pages/Models";
+import { Tasks } from "@/pages/Tasks";
+import { TaskDetail } from "@/pages/TaskDetail";
 
 export function App() {
   return (
@@ -57,6 +59,8 @@ export function App() {
               />
             </Route>
             <Route path="/team" element={<Team />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/tasks/:id" element={<TaskDetail />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/models" element={<Models />} />
           </Route>

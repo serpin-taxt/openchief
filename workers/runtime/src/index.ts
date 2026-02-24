@@ -132,6 +132,16 @@ export default {
       return Response.json({ ok: true, cleared: `chat:${agentId}:${userEmail}` });
     }
 
+    // POST /trigger-task/:agentId — manually trigger task execution for an agent
+    const taskMatch = path.match(/^\/trigger-task\/([^/]+)$/);
+    if (taskMatch && request.method === "POST") {
+      const [, agentId] = taskMatch;
+      const doId = env.AGENT_DO.idFromName(agentId);
+      const stub = env.AGENT_DO.get(doId);
+      const result = await stub.triggerTaskExecution(agentId);
+      return Response.json(result, { status: result.ok ? 200 : 500 });
+    }
+
     // POST /admin/reset-alarms — force all agents to the staggered schedule
     if (path === "/admin/reset-alarms" && request.method === "POST") {
       const { results: agents } = await env.DB.prepare(

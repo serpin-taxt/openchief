@@ -19,3 +19,13 @@ export type {
 export type { AgentRevision } from "./revision.js";
 
 export type { OpenChiefConfig } from "./config.js";
+
+export type {
+  Task,
+  TaskStatus,
+  TaskOutput,
+  TaskArtifact,
+  TaskContext,
+  TaskProposal,
+  TaskDecision,
+} from "./task.js";

@@ -4,13 +4,16 @@ import type {
   AgentDefinition,
   AgentReport,
   ReportConfig,
+  Task,
 } from "@openchief/shared";
 import { callClaude } from "./claude-client";
 import { buildPrompt } from "./prompt-builder";
-import type { IdentityInfo, OrgInfo } from "./prompt-builder";
+import type { IdentityInfo, OrgInfo, PendingTask } from "./prompt-builder";
 import { buildChatSystemPrompt } from "./chat-prompt";
 import { buildMeetingPrompt } from "./meeting-prompt";
-import { parseReportContent } from "./report-parser";
+import type { MeetingTaskData } from "./meeting-prompt";
+import { parseReportContent, parseTaskProposals, parseTaskDecisions } from "./report-parser";
+import { buildTaskExecutionPrompt } from "./task-prompt";
 import { getAgentTools, executeTool } from "./agent-tools";
 import type { ToolDefinition } from "./agent-tools";
 import { retrieveContext, indexReport } from "./rag";
@@ -218,7 +221,7 @@ export class AgentDurableObject extends DurableObject<Env> {
   }
 
   /**
-   * Alarm handler — triggers report generation.
+   * Alarm handler — triggers report generation or task execution.
    */
   async alarm(): Promise<void> {
     const config = await this.getAgentConfig();
@@ -230,16 +233,22 @@ export class AgentDurableObject extends DurableObject<Env> {
     const alarmType =
       (await this.ctx.storage.get<string>("pending_alarm_type")) || "daily";
 
-    const reportConfig = config.outputs.reports.find((r) => {
-      if (alarmType === "weekly") return r.reportType.includes("weekly");
-      return r.cadence === "daily";
-    });
+    if (alarmType === "task") {
+      // Task execution alarm
+      await this.executeNextTask(config);
+    } else {
+      // Report generation alarm
+      const reportConfig = config.outputs.reports.find((r) => {
+        if (alarmType === "weekly") return r.reportType.includes("weekly");
+        return r.cadence === "daily";
+      });
 
-    if (reportConfig) {
-      await this.generateReport(reportConfig, config);
+      if (reportConfig) {
+        await this.generateReport(reportConfig, config);
+      }
     }
 
-    await this.scheduleNextPeriodicAlarm(config);
+    await this.scheduleNextAlarm(config);
   }
 
   /**
@@ -921,6 +930,25 @@ export class AgentDurableObject extends DurableObject<Env> {
       }
     }
 
+    // Load pending tasks so agents don't propose duplicates
+    let pendingTasks: PendingTask[] = [];
+    if (!isCeoMeeting) {
+      try {
+        const taskRows = await this.env.DB.prepare(
+          `SELECT title, assigned_to, status FROM tasks
+           WHERE status IN ('proposed', 'queued', 'in_progress')
+           ORDER BY priority DESC LIMIT 20`
+        ).all<{ title: string; assigned_to: string | null; status: string }>();
+        pendingTasks = (taskRows.results || []).map((r) => ({
+          title: r.title,
+          assignedTo: r.assigned_to,
+          status: r.status,
+        }));
+      } catch (err) {
+        console.error("Failed to load pending tasks:", err);
+      }
+    }
+
     // Build prompt — CEO meeting uses a special prompt that synthesizes
     // all other agents' daily reports instead of raw events
     let prompt: { system: string; user: string };
@@ -940,7 +968,8 @@ export class AgentDurableObject extends DurableObject<Env> {
         recentReports,
         ragContext,
         identities,
-        this.getOrgInfo()
+        this.getOrgInfo(),
+        pendingTasks
       );
     }
 
@@ -1016,6 +1045,86 @@ export class AgentDurableObject extends DurableObject<Env> {
       JSON.stringify(report),
       { expirationTtl: 86400 }
     );
+
+    // Extract and insert task proposals (non-CEO reports only)
+    if (!isCeoMeeting) {
+      try {
+        const PRIORITY_MAP: Record<string, number> = {
+          low: 20,
+          medium: 40,
+          high: 60,
+          critical: 80,
+        };
+        const proposals = parseTaskProposals(response.text);
+        for (const proposal of proposals) {
+          // Check for duplicate: same title + assignee already pending
+          const existing = await this.env.DB.prepare(
+            `SELECT id FROM tasks
+             WHERE title = ? AND assigned_to = ? AND status IN ('proposed', 'queued', 'in_progress')
+             LIMIT 1`
+          )
+            .bind(proposal.title, proposal.assignTo)
+            .first<{ id: string }>();
+          if (existing) continue;
+
+          const taskId = generateULID();
+          await this.env.DB.prepare(
+            `INSERT INTO tasks (id, title, description, status, priority, created_by, assigned_to, source_report_id, context, tokens_used, created_at, updated_at)
+             VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?, ?, 0, ?, ?)`
+          )
+            .bind(
+              taskId,
+              proposal.title,
+              proposal.description,
+              PRIORITY_MAP[proposal.priority] || 40,
+              config.id,
+              proposal.assignTo,
+              reportId,
+              JSON.stringify(proposal.context),
+              now,
+              now
+            )
+            .run();
+          console.log(
+            `Task proposed by ${config.id}: "${proposal.title}" → ${proposal.assignTo}`
+          );
+        }
+      } catch (err) {
+        console.error("Failed to insert task proposals:", err);
+      }
+    }
+
+    // Process CEO task decisions (CEO meetings only)
+    if (isCeoMeeting) {
+      try {
+        const decisions = parseTaskDecisions(response.text);
+        for (const decision of decisions) {
+          if (decision.action === "queue") {
+            await this.env.DB.prepare(
+              `UPDATE tasks SET status = 'queued', priority = ?, updated_at = ?
+               WHERE id = ? AND status = 'proposed'`
+            )
+              .bind(decision.priority, now, decision.taskId)
+              .run();
+            console.log(
+              `CEO queued task ${decision.taskId} with priority ${decision.priority}${decision.notes ? `: ${decision.notes}` : ""}`
+            );
+          } else if (decision.action === "cancel") {
+            await this.env.DB.prepare(
+              `UPDATE tasks SET status = 'cancelled', updated_at = ?
+               WHERE id = ? AND status = 'proposed'`
+            )
+              .bind(now, decision.taskId)
+              .run();
+            console.log(
+              `CEO cancelled task ${decision.taskId}${decision.notes ? `: ${decision.notes}` : ""}`
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Failed to process CEO task decisions:", err);
+      }
+    }
 
     // Index in Vectorize for RAG (non-blocking)
     if (this.env.VECTORIZE && this.env.AI) {
@@ -1108,8 +1217,58 @@ export class AgentDurableObject extends DurableObject<Env> {
       }
     }
 
+    // Load task data for the meeting
+    let taskData: MeetingTaskData | undefined;
+    try {
+      // Proposed tasks awaiting prioritization
+      const proposedRows = await this.env.DB.prepare(
+        `SELECT id, title, description, status, priority, created_by, assigned_to,
+                source_report_id, output, context, started_at, completed_at,
+                due_by, tokens_used, created_at, updated_at
+         FROM tasks WHERE status = 'proposed'
+         ORDER BY priority DESC, created_at ASC LIMIT 20`
+      ).all();
+
+      // Recently completed tasks (last 48h)
+      const completedCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const completedRows = await this.env.DB.prepare(
+        `SELECT id, title, description, status, priority, created_by, assigned_to,
+                source_report_id, output, context, started_at, completed_at,
+                due_by, tokens_used, created_at, updated_at
+         FROM tasks WHERE status = 'completed' AND completed_at > ?
+         ORDER BY completed_at DESC LIMIT 10`
+      ).bind(completedCutoff).all();
+
+      const mapRow = (r: Record<string, unknown>): Task => ({
+        id: r.id as string,
+        title: r.title as string,
+        description: r.description as string,
+        status: r.status as Task["status"],
+        priority: r.priority as number,
+        createdBy: r.created_by as string,
+        assignedTo: (r.assigned_to as string) || null,
+        sourceReportId: (r.source_report_id as string) || null,
+        output: r.output ? JSON.parse(r.output as string) : null,
+        context: r.context ? JSON.parse(r.context as string) : null,
+        startedAt: (r.started_at as string) || null,
+        completedAt: (r.completed_at as string) || null,
+        dueBy: (r.due_by as string) || null,
+        tokensUsed: (r.tokens_used as number) || 0,
+        createdAt: r.created_at as string,
+        updatedAt: r.updated_at as string,
+      });
+
+      taskData = {
+        proposedTasks: (proposedRows.results || []).map(mapRow),
+        completedTasks: (completedRows.results || []).map(mapRow),
+      };
+    } catch (err) {
+      console.error("Failed to load tasks for CEO meeting:", err);
+    }
+
     console.log(
-      `CEO meeting: synthesizing ${dailyReports.length} department reports from ${agentConfigs.length} agents`
+      `CEO meeting: synthesizing ${dailyReports.length} department reports from ${agentConfigs.length} agents` +
+      (taskData ? `, ${taskData.proposedTasks.length} proposed tasks, ${taskData.completedTasks.length} completed tasks` : "")
     );
 
     return buildMeetingPrompt(
@@ -1118,7 +1277,8 @@ export class AgentDurableObject extends DurableObject<Env> {
       dailyReports,
       reportConfig,
       previousMeetings,
-      ragContext ?? undefined
+      ragContext ?? undefined,
+      taskData
     );
   }
 
@@ -1251,9 +1411,177 @@ export class AgentDurableObject extends DurableObject<Env> {
   /**
    * Schedule the next daily/weekly alarm at this agent's staggered time slot.
    */
-  private async scheduleNextPeriodicAlarm(
-    config: AgentDefinition
-  ): Promise<void> {
+  /**
+   * Public wrapper for manual task execution trigger.
+   */
+  async triggerTaskExecution(agentId: string): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    await this.ensureAgentId(agentId);
+    const config = await this.getAgentConfig();
+    if (!config) {
+      return { ok: false, error: "No agent config found" };
+    }
+    try {
+      await this.executeNextTask(config);
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return { ok: false, error: msg };
+    }
+  }
+
+  /**
+   * Execute the highest-priority queued task assigned to this agent.
+   */
+  private async executeNextTask(config: AgentDefinition): Promise<void> {
+    // Skip CEO (prioritizes, doesn't execute) and agents without tools
+    if (config.id === "ceo") return;
+
+    // Find highest-priority queued task assigned to this agent
+    const taskRow = await this.env.DB.prepare(
+      `SELECT id, title, description, status, priority, created_by, assigned_to,
+              source_report_id, output, context, started_at, completed_at,
+              due_by, tokens_used, created_at, updated_at
+       FROM tasks
+       WHERE assigned_to = ? AND status = 'queued'
+       ORDER BY priority DESC, created_at ASC
+       LIMIT 1`
+    )
+      .bind(config.id)
+      .first<Record<string, unknown>>();
+
+    if (!taskRow) return; // No tasks to execute
+
+    const task: Task = {
+      id: taskRow.id as string,
+      title: taskRow.title as string,
+      description: taskRow.description as string,
+      status: taskRow.status as Task["status"],
+      priority: taskRow.priority as number,
+      createdBy: taskRow.created_by as string,
+      assignedTo: (taskRow.assigned_to as string) || null,
+      sourceReportId: (taskRow.source_report_id as string) || null,
+      output: taskRow.output ? JSON.parse(taskRow.output as string) : null,
+      context: taskRow.context ? JSON.parse(taskRow.context as string) : null,
+      startedAt: (taskRow.started_at as string) || null,
+      completedAt: (taskRow.completed_at as string) || null,
+      dueBy: (taskRow.due_by as string) || null,
+      tokensUsed: (taskRow.tokens_used as number) || 0,
+      createdAt: taskRow.created_at as string,
+      updatedAt: taskRow.updated_at as string,
+    };
+
+    const now = new Date().toISOString();
+
+    // Mark as in_progress
+    await this.env.DB.prepare(
+      `UPDATE tasks SET status = 'in_progress', started_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'queued'`
+    )
+      .bind(now, now, task.id)
+      .run();
+
+    console.log(`Starting task execution: "${task.title}" for ${config.id}`);
+
+    try {
+      // Load identities for context
+      const identities = await this.loadIdentities();
+
+      // Retrieve RAG context
+      let ragContext: string | null = null;
+      if (this.env.VECTORIZE && this.env.AI) {
+        try {
+          ragContext = await retrieveContext(
+            { VECTORIZE: this.env.VECTORIZE, AI: this.env.AI },
+            config.id,
+            `${task.title} ${task.description}`
+          );
+        } catch (err) {
+          console.error("RAG context retrieval failed:", err);
+        }
+      }
+
+      // Build prompt
+      const prompt = buildTaskExecutionPrompt(
+        config,
+        task,
+        identities,
+        ragContext,
+        this.getOrgInfo()
+      );
+
+      // Call Claude
+      const modelSettings = await this.getModelSettings("task-execution");
+      const response = await callClaude(
+        this.env.ANTHROPIC_API_KEY,
+        prompt.system,
+        [{ role: "user", content: prompt.user }],
+        modelSettings.model,
+        modelSettings.maxTokens
+      );
+
+      // Parse output
+      let output: { summary: string; content: string; artifacts: Array<{ name: string; type: string; content: string }> };
+      try {
+        let cleaned = response.text.trim();
+        if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+        else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+        if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+        cleaned = cleaned.trim();
+
+        const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+        output = {
+          summary: (parsed.summary as string) || "Task completed",
+          content: (parsed.content as string) || cleaned,
+          artifacts: Array.isArray(parsed.artifacts) ? parsed.artifacts as Array<{ name: string; type: string; content: string }> : [],
+        };
+      } catch {
+        // If JSON parsing fails, use the raw text as content
+        output = {
+          summary: "Task completed (output parsing failed)",
+          content: response.text.slice(0, 10000),
+          artifacts: [],
+        };
+      }
+
+      const completedAt = new Date().toISOString();
+      const tokensUsed = (response.inputTokens || 0) + (response.outputTokens || 0);
+
+      // Mark as completed
+      await this.env.DB.prepare(
+        `UPDATE tasks SET status = 'completed', output = ?, completed_at = ?,
+                tokens_used = ?, updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(JSON.stringify(output), completedAt, tokensUsed, completedAt, task.id)
+        .run();
+
+      console.log(
+        `Task completed: "${task.title}" by ${config.id} (${tokensUsed} tokens)`
+      );
+    } catch (err) {
+      console.error(`Task execution failed for "${task.title}":`, err);
+      // Revert to queued so it can be retried next hour
+      await this.env.DB.prepare(
+        `UPDATE tasks SET status = 'queued', started_at = NULL, updated_at = ?
+         WHERE id = ? AND status = 'in_progress'`
+      )
+        .bind(new Date().toISOString(), task.id)
+        .run();
+    }
+  }
+
+  /**
+   * Dual alarm system: picks whichever is sooner — next report or next task check.
+   * DOs only support one active alarm, so we compute both candidate times and
+   * set the alarm for whichever comes first.
+   */
+  private async scheduleNextAlarm(config: AgentDefinition): Promise<void> {
+    const tz = this.env.REPORT_TIMEZONE || "America/Chicago";
+
+    // Candidate 1: Next report time
+    let nextReport: Date | null = null;
+    let reportType = "daily";
+
     const hasDaily = config.outputs.reports.some(
       (r) => r.cadence === "daily"
     );
@@ -1261,21 +1589,13 @@ export class AgentDurableObject extends DurableObject<Env> {
       (r) => r.cadence === "weekly"
     );
 
-    if (!hasDaily && !hasWeekly) return;
-
-    const tz = this.env.REPORT_TIMEZONE || "America/Chicago";
-    const { hour, minute } = getAgentReportTime(config.id);
-
     if (hasDaily) {
-      // skipToTomorrow=true because we just ran today's report
-      const next = nextWeekdayAlarm(hour, minute, tz, true);
-      await this.ctx.storage.put("pending_alarm_type", "daily");
-      await this.ctx.storage.setAlarm(next.getTime());
-      console.log(
-        `Scheduled next ${config.id} daily alarm for ${next.toISOString()}`
-      );
+      const { hour, minute } = getAgentReportTime(config.id);
+      nextReport = nextWeekdayAlarm(hour, minute, tz, true);
+      reportType = "daily";
     } else if (hasWeekly) {
-      // Weekly: find next Monday at the agent's time slot
+      const { hour, minute } = getAgentReportTime(config.id);
+      // Find next Monday
       const now = new Date();
       for (let d = 1; d <= 7; d++) {
         const candidate = new Date(now);
@@ -1285,15 +1605,75 @@ export class AgentDurableObject extends DurableObject<Env> {
         const utc = new Date(candidate.getTime() - offset);
         const localDay = new Date(utc.getTime() + offset).getUTCDay();
         if (localDay === 1) {
-          // Monday
-          await this.ctx.storage.put("pending_alarm_type", "weekly");
-          await this.ctx.storage.setAlarm(utc.getTime());
-          console.log(
-            `Scheduled next ${config.id} weekly alarm for ${utc.toISOString()}`
-          );
-          return;
+          nextReport = utc;
+          reportType = "weekly";
+          break;
         }
       }
     }
+
+    // Candidate 2: Next task check (hourly, business hours 8am-6pm, weekdays only)
+    // Skip for CEO (prioritizes, doesn't execute)
+    let nextTask: Date | null = null;
+    if (config.id !== "ceo") {
+      // Stagger task checks by agent ID hash (0-14 minutes past the hour)
+      let hash = 0;
+      for (let i = 0; i < config.id.length; i++) {
+        hash = ((hash << 5) - hash + config.id.charCodeAt(i)) | 0;
+      }
+      const staggerMinute = (hash >>> 0) % 15;
+
+      const now = new Date();
+      // Try each of the next 24 hours to find the next valid task slot
+      for (let h = 1; h <= 24; h++) {
+        const candidate = new Date(now.getTime() + h * 60 * 60 * 1000);
+        // Snap to the staggered minute past the hour
+        candidate.setUTCMinutes(staggerMinute, 0, 0);
+
+        // Convert to local time to check business hours
+        const offset = tzOffsetMs(candidate, tz);
+        const localDate = new Date(candidate.getTime() + offset);
+        const localHour = localDate.getUTCHours();
+        const localDay = localDate.getUTCDay();
+
+        // Must be weekday
+        if (localDay === 0 || localDay === 6) continue;
+        // Must be business hours (8am-6pm)
+        if (localHour < 8 || localHour >= 18) continue;
+        // Must be in the future
+        if (candidate.getTime() <= now.getTime()) continue;
+
+        nextTask = candidate;
+        break;
+      }
+    }
+
+    // Pick whichever is sooner
+    let alarmTime: Date;
+    let alarmType: string;
+
+    if (nextReport && nextTask) {
+      if (nextTask.getTime() < nextReport.getTime()) {
+        alarmTime = nextTask;
+        alarmType = "task";
+      } else {
+        alarmTime = nextReport;
+        alarmType = reportType;
+      }
+    } else if (nextReport) {
+      alarmTime = nextReport;
+      alarmType = reportType;
+    } else if (nextTask) {
+      alarmTime = nextTask;
+      alarmType = "task";
+    } else {
+      return; // No alarms needed
+    }
+
+    await this.ctx.storage.put("pending_alarm_type", alarmType);
+    await this.ctx.storage.setAlarm(alarmTime.getTime());
+    console.log(
+      `Scheduled next ${config.id} ${alarmType} alarm for ${alarmTime.toISOString()}`
+    );
   }
 }

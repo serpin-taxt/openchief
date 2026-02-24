@@ -33,6 +33,12 @@ export interface OrgInfo {
 /**
  * Build the system + user prompt for report generation.
  */
+export interface PendingTask {
+  title: string;
+  assignedTo: string | null;
+  status: string;
+}
+
 export function buildPrompt(
   config: AgentDefinition,
   reportConfig: ReportConfig,
@@ -40,10 +46,11 @@ export function buildPrompt(
   recentReports: string[],
   ragContext: string | null,
   identities: IdentityInfo[],
-  org?: OrgInfo
+  org?: OrgInfo,
+  pendingTasks?: PendingTask[]
 ): Prompt {
   const system = buildSystemPrompt(config, reportConfig, identities, org);
-  const user = buildUserPrompt(events, recentReports, ragContext);
+  const user = buildUserPrompt(events, recentReports, ragContext, pendingTasks);
   return { system, user };
 }
 
@@ -96,8 +103,18 @@ You must output ONLY valid JSON matching this exact shape:
   "actionItems": [
     { "description": "What needs attention", "priority": "low|medium|high|critical", "sourceUrl": "optional link", "assignee": "optional person" }
   ],
+  "taskProposals": [
+    { "title": "Short task title", "description": "What the task involves and expected deliverable", "assignTo": "agent-id to assign (e.g. eng-manager, marketing-manager)", "priority": "low|medium|high|critical", "context": { "reasoning": "Why this task is needed based on today's data" } }
+  ],
   "healthSignal": "green|yellow|red"
 }
+
+═══ TASK PROPOSALS ═══
+If your analysis reveals work that an agent could do autonomously — writing blog posts, researching competitors, analyzing trends, drafting documentation, building reports — propose up to 3 tasks. Only propose tasks when there's a clear need based on today's data. Each task should:
+- Have a concrete, achievable deliverable
+- Be assigned to the most appropriate agent by their ID
+- Include reasoning tied to specific events or patterns you observed
+- Not duplicate any pending tasks listed below
 
 ═══ ANALYSIS GUIDELINES ═══
 1. Be specific — cite PR numbers, exact metrics, names.
@@ -116,7 +133,8 @@ CRITICAL: Keep your TOTAL JSON output under 4000 tokens. Each section body shoul
 function buildUserPrompt(
   events: EventRow[],
   recentReports: string[],
-  ragContext: string | null
+  ragContext: string | null,
+  pendingTasks?: PendingTask[]
 ): string {
   const parts: string[] = [];
 
@@ -151,6 +169,14 @@ function buildUserPrompt(
     parts.push("\n═══ PREVIOUS REPORTS (for trend comparison) ═══");
     for (const report of recentReports) {
       parts.push(report);
+    }
+  }
+
+  // Pending tasks — so the agent doesn't propose duplicates
+  if (pendingTasks && pendingTasks.length > 0) {
+    parts.push("\n═══ PENDING TASKS (do not duplicate these) ═══");
+    for (const task of pendingTasks) {
+      parts.push(`- [${task.status}] ${task.title}${task.assignedTo ? ` (assigned to ${task.assignedTo})` : ""}`);
     }
   }
 

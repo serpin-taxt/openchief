@@ -80,6 +80,27 @@ const ALL_TOOLS: Record<string, ToolDefinition> = {
       required: ["query"],
     },
   },
+
+  query_tasks: {
+    name: "query_tasks",
+    description:
+      "Run a read-only SQL query against the OpenChief tasks table. " +
+      "The table schema: tasks(id TEXT, title TEXT, description TEXT, status TEXT, priority INTEGER, " +
+      "created_by TEXT, assigned_to TEXT, source_report_id TEXT, output TEXT, context TEXT, " +
+      "started_at TEXT, completed_at TEXT, due_by TEXT, tokens_used INTEGER, created_at TEXT, updated_at TEXT). " +
+      "Status values: proposed, queued, in_progress, completed, cancelled. " +
+      "Only SELECT queries are allowed. Always include a LIMIT clause.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "SQL SELECT query to execute against the tasks table",
+        },
+      },
+      required: ["query"],
+    },
+  },
 };
 
 /**
@@ -121,6 +142,9 @@ export async function executeTool(
           env.GITHUB_TOKEN,
           env.GITHUB_REPO
         );
+
+      case "query_tasks":
+        return executeQueryTasks(input.query as string, env.DB);
 
       default:
         return { content: `Unknown tool: ${toolName}`, is_error: true };
@@ -195,6 +219,73 @@ async function executeQueryEvents(
   const output = `${header}\n${separator}\n${body}`;
 
   // Truncate if too large
+  if (output.length > 15000) {
+    return { content: output.slice(0, 15000) + "\n\n... (truncated)" };
+  }
+
+  return { content: output };
+}
+
+/**
+ * Execute a read-only SQL query against the D1 tasks table.
+ */
+async function executeQueryTasks(
+  query: string,
+  db: D1Database
+): Promise<{ content: string; is_error?: boolean }> {
+  // Reuse the same safety checks as query_events
+  const normalized = query.trim().toUpperCase();
+  if (!normalized.startsWith("SELECT") && !normalized.startsWith("WITH")) {
+    return {
+      content: "Only SELECT/WITH queries are allowed.",
+      is_error: true,
+    };
+  }
+
+  const forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE", "ATTACH"];
+  for (const word of forbidden) {
+    if (normalized.includes(word)) {
+      return {
+        content: `Forbidden keyword: ${word}. Only read-only queries are allowed.`,
+        is_error: true,
+      };
+    }
+  }
+
+  if (!normalized.includes("LIMIT")) {
+    return {
+      content: "Please add a LIMIT clause to your query (max 100 rows).",
+      is_error: true,
+    };
+  }
+
+  const result = await db.prepare(query).all();
+  const rows = result.results || [];
+
+  if (rows.length === 0) {
+    return { content: "No results found." };
+  }
+
+  const columns = Object.keys(rows[0] as Record<string, unknown>);
+  const header = columns.join(" | ");
+  const separator = columns.map(() => "---").join(" | ");
+  const body = rows
+    .slice(0, 100)
+    .map((row) => {
+      const r = row as Record<string, unknown>;
+      return columns
+        .map((col) => {
+          const val = r[col];
+          if (val === null || val === undefined) return "";
+          const str = String(val);
+          return str.length > 200 ? str.slice(0, 200) + "..." : str;
+        })
+        .join(" | ");
+    })
+    .join("\n");
+
+  const output = `${header}\n${separator}\n${body}`;
+
   if (output.length > 15000) {
     return { content: output.slice(0, 15000) + "\n\n... (truncated)" };
   }
