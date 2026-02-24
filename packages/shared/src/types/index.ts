@@ -6,6 +6,7 @@ export type {
   AgentPersona,
   AgentOutputConfig,
   ReportConfig,
+  AgentStrategy,
 } from "./agent.js";
 
 export type {

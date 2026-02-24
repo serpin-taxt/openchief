@@ -9,6 +9,7 @@ import { callClaude } from "./claude-client";
 import { buildPrompt } from "./prompt-builder";
 import type { IdentityInfo, OrgInfo } from "./prompt-builder";
 import { buildChatSystemPrompt } from "./chat-prompt";
+import { buildMeetingPrompt } from "./meeting-prompt";
 import { parseReportContent } from "./report-parser";
 import { getAgentTools, executeTool } from "./agent-tools";
 import type { ToolDefinition } from "./agent-tools";
@@ -880,8 +881,10 @@ export class AgentDurableObject extends DurableObject<Env> {
       config.visibility
     );
 
-    // Skip if no events (unless weekly)
-    if (events.length === 0 && reportConfig.cadence !== "weekly") {
+    // Skip if no events (unless weekly or CEO meeting — CEO reads other reports)
+    const isCeoMeeting =
+      config.id === "ceo" && reportConfig.reportType === "daily-meeting";
+    if (events.length === 0 && reportConfig.cadence !== "weekly" && !isCeoMeeting) {
       return null;
     }
 
@@ -918,26 +921,42 @@ export class AgentDurableObject extends DurableObject<Env> {
       }
     }
 
-    // Build prompt
-    const prompt = buildPrompt(
-      config,
-      reportConfig,
-      events,
-      recentReports,
-      ragContext,
-      identities,
-      this.getOrgInfo()
-    );
+    // Build prompt — CEO meeting uses a special prompt that synthesizes
+    // all other agents' daily reports instead of raw events
+    let prompt: { system: string; user: string };
 
-    const reportJobType =
-      reportConfig.cadence === "weekly" ? "weekly-report" : "daily-report";
+    if (isCeoMeeting) {
+      prompt = await this.buildCeoMeetingPrompt(
+        config,
+        reportConfig,
+        recentReports,
+        ragContext
+      );
+    } else {
+      prompt = buildPrompt(
+        config,
+        reportConfig,
+        events,
+        recentReports,
+        ragContext,
+        identities,
+        this.getOrgInfo()
+      );
+    }
+
+    const reportJobType = isCeoMeeting
+      ? "daily-meeting"
+      : reportConfig.cadence === "weekly"
+        ? "weekly-report"
+        : "daily-report";
     const modelSettings = await this.getModelSettings(reportJobType);
     const response = await callClaude(
       this.env.ANTHROPIC_API_KEY,
       prompt.system,
       [{ role: "user", content: prompt.user }],
       modelSettings.model,
-      modelSettings.maxTokens
+      modelSettings.maxTokens,
+      isCeoMeeting ? { extendedContext: true } : undefined
     );
 
     const content = parseReportContent(response.text);
@@ -1014,6 +1033,93 @@ export class AgentDurableObject extends DurableObject<Env> {
     );
 
     return report;
+  }
+
+  /**
+   * Build the CEO meeting prompt by fetching all other agents' latest daily
+   * reports and feeding them into the meeting simulation.
+   */
+  private async buildCeoMeetingPrompt(
+    config: AgentDefinition,
+    reportConfig: ReportConfig,
+    previousMeetings: string[],
+    ragContext: string | null
+  ): Promise<{ system: string; user: string }> {
+    // Fetch all other enabled agents and their configs
+    const agentRows = await this.env.DB.prepare(
+      `SELECT id, config FROM agent_definitions WHERE enabled = 1 AND id != 'ceo'`
+    ).all<{ id: string; config: string }>();
+
+    const agentConfigs: AgentDefinition[] = [];
+    for (const row of agentRows.results || []) {
+      try {
+        agentConfigs.push(JSON.parse(row.config));
+      } catch {
+        /* skip unparseable */
+      }
+    }
+
+    // Fetch today's latest daily report from each agent
+    // Look back 12 hours to cover the 8:00-9:30 AM window generously
+    const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const reportRows = await this.env.DB.prepare(
+      `SELECT r.agent_id, r.content, a.config as agent_config
+       FROM reports r
+       JOIN agent_definitions a ON a.id = r.agent_id
+       WHERE r.agent_id != 'ceo'
+         AND r.created_at > ?
+         AND r.report_type NOT LIKE '%weekly%'
+       ORDER BY r.created_at DESC`
+    )
+      .bind(cutoff)
+      .all<{ agent_id: string; content: string; agent_config: string }>();
+
+    // De-duplicate: keep only the latest report per agent
+    const seen = new Set<string>();
+    const dailyReports: Array<{
+      agentId: string;
+      agentName: string;
+      content: {
+        headline: string;
+        sections: Array<{ name: string; body: string; severity: string }>;
+        actionItems: Array<{
+          description: string;
+          priority: string;
+          sourceUrl?: string;
+          assignee?: string;
+        }>;
+        healthSignal: string;
+      };
+    }> = [];
+
+    for (const row of reportRows.results || []) {
+      if (seen.has(row.agent_id)) continue;
+      seen.add(row.agent_id);
+      try {
+        const content = JSON.parse(row.content);
+        const agentConfig = JSON.parse(row.agent_config);
+        dailyReports.push({
+          agentId: row.agent_id,
+          agentName: agentConfig.name || row.agent_id,
+          content,
+        });
+      } catch {
+        /* skip unparseable */
+      }
+    }
+
+    console.log(
+      `CEO meeting: synthesizing ${dailyReports.length} department reports from ${agentConfigs.length} agents`
+    );
+
+    return buildMeetingPrompt(
+      config,
+      agentConfigs,
+      dailyReports,
+      reportConfig,
+      previousMeetings,
+      ragContext ?? undefined
+    );
   }
 
   /**
@@ -1117,6 +1223,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     const defaultModel = this.env.DEFAULT_MODEL || "claude-sonnet-4-6";
     const defaults: Record<string, { model: string; maxTokens: number }> = {
       "daily-report": { model: defaultModel, maxTokens: 8192 },
+      "daily-meeting": { model: defaultModel, maxTokens: 16384 },
       "weekly-report": { model: defaultModel, maxTokens: 8192 },
       chat: { model: defaultModel, maxTokens: 8192 },
     };

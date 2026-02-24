@@ -19,6 +19,10 @@ import {
   ScrollText,
   TrendingUp,
   Activity,
+  Target,
+  Compass,
+  Heart,
+  Flag,
 } from "lucide-react";
 import {
   BarChart,
@@ -31,6 +35,7 @@ import {
 import type {
   AgentDefinition,
   AgentReport,
+  AgentStrategy,
   EventSubscription,
   ReportConfig,
 } from "@openchief/shared";
@@ -82,7 +87,11 @@ type CardId =
   | "watch-patterns"
   | "sources"
   | "report-types"
-  | "instructions";
+  | "instructions"
+  | "mission"
+  | "vision"
+  | "values"
+  | "goals";
 
 interface CardDef {
   id: CardId;
@@ -163,6 +172,45 @@ const CONFIG_CARDS: CardDef[] = [
     label: "Instructions",
     icon: ScrollText,
     getSummary: () => "View full instructions",
+  },
+];
+
+const STRATEGY_CARDS: CardDef[] = [
+  {
+    id: "mission",
+    label: "Mission",
+    icon: Target,
+    getSummary: (a) =>
+      a.strategy?.mission ? truncate(a.strategy.mission, 80) : "Not set",
+  },
+  {
+    id: "vision",
+    label: "Vision",
+    icon: Compass,
+    getSummary: (a) =>
+      a.strategy?.vision ? truncate(a.strategy.vision, 80) : "Not set",
+  },
+  {
+    id: "values",
+    label: "Values",
+    icon: Heart,
+    getSummary: (a) => {
+      const count = a.strategy?.values?.length ?? 0;
+      return count > 0
+        ? `${count} value${count !== 1 ? "s" : ""}`
+        : "Not set";
+    },
+  },
+  {
+    id: "goals",
+    label: "Goals",
+    icon: Flag,
+    getSummary: (a) => {
+      const count = a.strategy?.goals?.length ?? 0;
+      return count > 0
+        ? `${count} goal${count !== 1 ? "s" : ""}`
+        : "Not set";
+    },
   },
 ];
 
@@ -438,6 +486,35 @@ export function AgentDetail() {
         </div>
       </section>
 
+      {/* Strategy Cards — only for agents with strategy config (CEO) */}
+      {agent.strategy && (
+        <section className="relative">
+          <h2 className="mb-3 text-lg font-medium">Strategy</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {STRATEGY_CARDS.map((card) => {
+              const Icon = card.icon;
+              return (
+                <button
+                  key={card.id}
+                  onClick={() => setOpenDrawer(card.id)}
+                  className="flex flex-col gap-1.5 rounded-lg border border-border p-3 text-left transition-colors hover:border-ring hover:bg-secondary/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {card.label}
+                    </span>
+                  </div>
+                  <p className="text-sm leading-snug text-foreground/80 line-clamp-2">
+                    {card.getSummary(agent)}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Per-section Drawers */}
       <Sheet
         open={openDrawer === "role"}
@@ -637,6 +714,115 @@ export function AgentDetail() {
                 await saveAgent({
                   ...agent,
                   persona: { ...agent.persona, instructions: value },
+                });
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Strategy Drawers */}
+      <Sheet
+        open={openDrawer === "mission"}
+        onOpenChange={(open) => !open && setOpenDrawer(null)}
+      >
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Mission</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <EditablePersonaField
+              label="Mission"
+              placeholder="Why your company exists — the core purpose that drives everything..."
+              value={agent.strategy?.mission}
+              onSave={async (value) => {
+                await saveAgent({
+                  ...agent,
+                  strategy: {
+                    ...agent.strategy,
+                    mission: value || undefined,
+                  },
+                });
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={openDrawer === "vision"}
+        onOpenChange={(open) => !open && setOpenDrawer(null)}
+      >
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Vision</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <EditablePersonaField
+              label="Vision"
+              placeholder="Where your company is headed — the future state you're building toward..."
+              value={agent.strategy?.vision}
+              onSave={async (value) => {
+                await saveAgent({
+                  ...agent,
+                  strategy: {
+                    ...agent.strategy,
+                    vision: value || undefined,
+                  },
+                });
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={openDrawer === "values"}
+        onOpenChange={(open) => !open && setOpenDrawer(null)}
+      >
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Values</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <EditableListField
+              label="Values"
+              placeholder="Add a core value..."
+              items={agent.strategy?.values ?? []}
+              onSave={async (items) => {
+                await saveAgent({
+                  ...agent,
+                  strategy: {
+                    ...agent.strategy,
+                    values: items.length > 0 ? items : undefined,
+                  },
+                });
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={openDrawer === "goals"}
+        onOpenChange={(open) => !open && setOpenDrawer(null)}
+      >
+        <SheetContent className="w-full sm:w-[500px] sm:max-w-[600px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Goals</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <EditableListField
+              label="Strategic Goals"
+              placeholder="Add a strategic goal..."
+              items={agent.strategy?.goals ?? []}
+              onSave={async (items) => {
+                await saveAgent({
+                  ...agent,
+                  strategy: {
+                    ...agent.strategy,
+                    goals: items.length > 0 ? items : undefined,
+                  },
                 });
               }}
             />

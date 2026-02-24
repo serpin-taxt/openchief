@@ -32,6 +32,13 @@ export interface AgentDefinition {
 
   /** Emails allowed to view this agent when visibility is "exec" */
   allowedEmails?: string[];
+
+  /**
+   * Company strategy context — used by the CEO agent to anchor every
+   * meeting around long-term mission, vision, values, and goals.
+   * Other agents can also reference this for strategic alignment.
+   */
+  strategy?: AgentStrategy;
 }
 
 export interface EventSubscription {
@@ -86,4 +93,18 @@ export interface ReportConfig {
 
   /** Sections this report should contain */
   sections: string[];
+}
+
+export interface AgentStrategy {
+  /** The company's reason for existing — why it matters */
+  mission?: string;
+
+  /** Where the company is headed — the future state being built */
+  vision?: string;
+
+  /** Core principles that guide decisions and trade-offs */
+  values?: string[];
+
+  /** Current strategic goals — what "winning" looks like right now */
+  goals?: string[];
 }

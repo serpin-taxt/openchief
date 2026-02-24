@@ -13,15 +13,23 @@ export async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   model = "claude-sonnet-4-6",
-  maxTokens = 8192
+  maxTokens = 8192,
+  options?: { extendedContext?: boolean }
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+
+  // Enable 1M context window (beta) — requires usage tier 4+
+  if (options?.extendedContext) {
+    headers["anthropic-beta"] = "context-1m-2025-08-07";
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    headers,
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,

@@ -1,4 +1,4 @@
-import type { AgentDefinition, ReportConfig } from "@openchief/shared";
+import type { AgentDefinition, ReportConfig, AgentStrategy } from "@openchief/shared";
 
 interface DailyReport {
   agentId: string;
@@ -37,6 +37,41 @@ export function buildMeetingPrompt(
   return { system, user };
 }
 
+function buildStrategyBlock(strategy: AgentStrategy): string {
+  const parts: string[] = [];
+
+  parts.push("═══════════════════════════════════════════════════════════");
+  parts.push("COMPANY STRATEGY — THIS IS YOUR NORTH STAR");
+  parts.push("Every discussion, priority, and decision in this meeting");
+  parts.push("must be evaluated against these anchors.");
+  parts.push("═══════════════════════════════════════════════════════════");
+
+  if (strategy.mission) {
+    parts.push(`\nMISSION (why we exist):\n${strategy.mission}`);
+  }
+
+  if (strategy.vision) {
+    parts.push(`\nVISION (where we're going):\n${strategy.vision}`);
+  }
+
+  if (strategy.values && strategy.values.length > 0) {
+    parts.push("\nVALUES (non-negotiable guardrails):");
+    for (const v of strategy.values) {
+      parts.push(`• ${v}`);
+    }
+  }
+
+  if (strategy.goals && strategy.goals.length > 0) {
+    parts.push("\nSTRATEGIC GOALS (what winning looks like right now):");
+    for (let i = 0; i < strategy.goals.length; i++) {
+      parts.push(`${i + 1}. ${strategy.goals[i]}`);
+    }
+  }
+
+  parts.push("\n═══════════════════════════════════════════════════════════");
+  return parts.join("\n");
+}
+
 function buildMeetingSystemPrompt(
   execConfig: AgentDefinition,
   agentConfigs: AgentDefinition[],
@@ -55,39 +90,50 @@ function buildMeetingSystemPrompt(
   const todayStr = now.toISOString().split("T")[0];
   const dayOfWeek = now.toLocaleDateString("en-US", { weekday: "long" });
 
+  const strategyBlock = execConfig.strategy
+    ? `\n${buildStrategyBlock(execConfig.strategy)}\n`
+    : "";
+
   return `TODAY'S DATE: ${dayOfWeek}, ${todayStr} (UTC)
 
 ${execConfig.persona.role}
 
 ${execConfig.persona.instructions}
-
+${strategyBlock}
 MEETING FORMAT:
-You are running the daily executive meeting. This is a structured negotiation between department heads.
+You are facilitating the daily executive meeting. This is a structured conversation where department heads report, debate, and align — and you ensure everything maps back to the mission, vision, and goals.
 
 DEPARTMENT HEADS IN THIS MEETING:
 ${agentRoster}
 
 MEETING RULES:
-1. You open the meeting and set the agenda based on what you see in the daily reports
-2. Each department head gets a turn to present their key findings and concerns
-3. After each presentation, OTHER department heads respond — they challenge, support, or add context from their own perspective
-4. You moderate: push for specifics, cut off tangents, connect themes across departments
-5. You are respectful but pushy — when there's disagreement, you drive to resolution
-6. Sometimes the focus is tactical (today's fires), sometimes strategic (long-term alignment) — balance both
-7. Highlight things that are common between departments — these are usually the most important
-8. Every agent speaks IN CHARACTER using their actual persona and style
-9. The meeting MUST conclude with clear priorities and action items
-10. You have the final word — you synthesize and decide
+1. You open the meeting by reminding the room of the most relevant strategic goal(s) for today's agenda
+2. Each department head presents their key findings — you listen actively
+3. After each presentation, you ask: "How does this connect to our goals?" and invite other department heads to respond
+4. When work doesn't map to a strategic goal, name it — ask why it's happening and whether it should continue
+5. When values are at risk, flag it immediately and make it a discussion point
+6. Highlight cross-functional patterns — these are usually the highest-leverage opportunities
+7. Every agent speaks IN CHARACTER using their actual persona and style
+8. Drive every discussion toward: what should we do, who owns it, and which goal does it serve?
+9. The meeting MUST conclude with priorities explicitly mapped to strategic goals
+10. You have the final word — synthesize, decide, and close with clear directives
+
+FACILITATION STYLE:
+- Ask more than you tell. "Does this serve our mission?" is your refrain.
+- When two departments conflict, force the trade-off conversation — name what we're choosing and what we're giving up
+- Celebrate work that clearly advances the mission — recognition reinforces alignment
+- Be direct about strategic drift — don't let it slide because the team is busy
+- Think in quarters and years, not just today
 
 WATCH PATTERNS:
 ${execConfig.persona.watchPatterns.map((p) => `- ${p}`).join("\n")}
 
 OUTPUT STYLE: ${execConfig.persona.outputStyle}
-${execConfig.persona.voice ? `\nYOUR VOICE (how you speak as the meeting moderator):\n${execConfig.persona.voice}\n` : ""}${execConfig.persona.personality ? `\nYOUR PERSONALITY (who you are — let this shape how you run the meeting):\n${execConfig.persona.personality}\n` : ""}
+${execConfig.persona.voice ? `\nYOUR VOICE (how you speak as the meeting facilitator):\n${execConfig.persona.voice}\n` : ""}${execConfig.persona.personality ? `\nYOUR PERSONALITY (who you are — let this shape how you run the meeting):\n${execConfig.persona.personality}\n` : ""}
 REPORT STRUCTURE:
 Produce a JSON response with this exact structure:
 {
-  "headline": "One-line meeting conclusion — the single most important takeaway",
+  "headline": "One-line meeting conclusion — the single most important strategic takeaway",
   "sections": [
     { "name": "section-name", "body": "Markdown content", "severity": "info|warning|critical" }
   ],
@@ -102,17 +148,21 @@ ${reportConfig.sections.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
 SECTION DETAILS:
 - **meeting-transcript**: The FULL meeting simulation. Use this format:
-  **[CEO]**: Opens meeting, sets agenda...
+  **[CEO]**: Opens meeting, frames today's agenda against strategic goals...
   **[Engineering Manager]**: Presents findings...
+  **[CEO]**: "How does this connect to [specific goal]?"
   **[Product Manager]**: Responds, adds perspective...
-  (challenges, rebuttals, discussion)
-  **[CEO]**: Synthesizes, drives to resolution...
-  Continue until all topics are covered. Make it feel like a real executive meeting — passionate, specific, connected to the mission.
+  (cross-functional discussion, challenges, alignment checks)
+  **[CEO]**: Synthesizes, maps to goals, drives to decision...
+  Continue until all topics are covered. The CEO should frequently reference the mission, vision, values, and goals. Make it feel like a real executive meeting run by someone obsessed with strategic alignment.
 
-- **strategic-priorities**: Top 3 strategic priorities emerging from the meeting
-- **daily-focus**: Today's tactical focus — what each department should prioritize
-- **cross-functional-synergies**: Where departments should collaborate today
-- **action-items**: Concrete actions with owners committed in the meeting
+- **strategic-alignment**: Map today's work to strategic goals. For each active goal, note what's advancing it, what's stalled, and what's missing. Flag any work that doesn't map to a goal. This is the most important section.
+
+- **daily-priorities**: Today's top priorities, each tagged with the strategic goal it serves. If a priority doesn't serve a goal, say so and recommend whether to continue or cut it.
+
+- **cross-functional-synergies**: Where departments should collaborate — specifically tied to accelerating strategic goals.
+
+- **action-items**: Concrete actions with owners. Each action item should reference the strategic goal it advances.
 
 Respond ONLY with valid JSON, no markdown code fences.`;
 }
@@ -192,12 +242,12 @@ function buildMeetingUserPrompt(
   // Agents that didn't report
   if (dailyReports.length === 0) {
     parts.push(
-      "Warning: No daily reports were received from any department. The meeting should note this and discuss what's happening."
+      "Warning: No daily reports were received from any department. The meeting should note this and discuss what's happening — is this a process failure or is something else going on?"
     );
   }
 
   parts.push(
-    "\nNow run the daily executive meeting. Each department head presents and debates. Drive toward strategic priorities, today's tactical focus, and specific action items with owners."
+    "\nNow facilitate the daily executive meeting. Listen to each department, ask how their work connects to our strategic goals, drive cross-functional discussion, and close with priorities mapped to goals."
   );
   parts.push("\nRespond with JSON only.");
 
