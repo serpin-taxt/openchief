@@ -955,7 +955,8 @@ export class AgentDurableObject extends DurableObject<Env> {
       prompt.system,
       [{ role: "user", content: prompt.user }],
       modelSettings.model,
-      modelSettings.maxTokens
+      modelSettings.maxTokens,
+      isCeoMeeting ? { extendedContext: true } : undefined
     );
 
     const content = parseReportContent(response.text);
