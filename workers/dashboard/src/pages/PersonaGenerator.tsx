@@ -41,7 +41,7 @@ interface SlackMessageCounts {
   messageCounts: { name: string; count: number }[];
 }
 
-export function VoiceGenerator() {
+export function PersonaGenerator() {
   const [identities, setIdentities] = useState<Identity[]>([]);
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
   const [slackCounts, setSlackCounts] = useState<SlackMessageCounts | null>(
@@ -232,7 +232,7 @@ export function VoiceGenerator() {
           </Link>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Voice Generator
+              Persona Generator
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Analyze the last 30 days of Slack messages to generate voice,
@@ -275,7 +275,7 @@ export function VoiceGenerator() {
             <div className="space-y-1">
               <p className="text-sm font-medium">No Slack data available</p>
               <p className="text-sm text-muted-foreground">
-                The Voice Generator needs Slack messages to analyze someone's
+                The Persona Generator needs Slack messages to analyze someone's
                 communication style. Connect and sync your Slack workspace first
                 from the{" "}
                 <Link

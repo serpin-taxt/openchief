@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Mic, ChevronRight } from "lucide-react";
+import { Sparkles, ChevronRight } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -10,12 +10,12 @@ import {
 
 const TOOLS = [
   {
-    id: "voice-generator",
-    name: "Voice Generator",
+    id: "persona-generator",
+    name: "Persona Generator",
     description:
       "Analyze a person's Slack messages to generate voice, personality, and output style fields for agent personas.",
-    icon: Mic,
-    path: "/tools/voice-generator",
+    icon: Sparkles,
+    path: "/tools/persona-generator",
   },
 ];
 

@@ -13,7 +13,7 @@ import { ReportView } from "@/pages/ReportView";
 import { Connections } from "@/pages/Connections";
 import { ConnectionDetail } from "@/pages/ConnectionDetail";
 import { Tools } from "@/pages/Tools";
-import { VoiceGenerator } from "@/pages/VoiceGenerator";
+import { PersonaGenerator } from "@/pages/PersonaGenerator";
 import { Team } from "@/pages/Team";
 import { Jobs } from "@/pages/Jobs";
 import { Models } from "@/pages/Models";
@@ -52,8 +52,8 @@ export function App() {
               />
               <Route path="/tools" element={<Tools />} />
               <Route
-                path="/tools/voice-generator"
-                element={<VoiceGenerator />}
+                path="/tools/persona-generator"
+                element={<PersonaGenerator />}
               />
             </Route>
             <Route path="/team" element={<Team />} />
