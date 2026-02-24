@@ -9,8 +9,11 @@ import {
   Sparkles,
   Paintbrush,
   Search,
+  UserCheck,
+  ChevronDown,
 } from "lucide-react";
 import { api, type Identity } from "@/lib/api";
+import type { AgentDefinition } from "@openchief/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,6 +35,7 @@ interface VoiceResult {
 
 export function VoiceGenerator() {
   const [identities, setIdentities] = useState<Identity[]>([]);
+  const [agents, setAgents] = useState<AgentDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -40,13 +44,23 @@ export function VoiceGenerator() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
+  // Apply-to-agent state
+  const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState(false);
+
   useEffect(() => {
     async function load() {
       try {
-        const data = await api.get<Identity[]>("identities");
-        setIdentities(data.filter((id) => !id.isBot && id.isActive));
+        const [identityData, agentData] = await Promise.all([
+          api.get<Identity[]>("identities"),
+          api.get<AgentDefinition[]>("agents"),
+        ]);
+        setIdentities(identityData.filter((id) => !id.isBot && id.isActive));
+        setAgents(agentData.filter((a) => a.enabled));
       } catch (err) {
-        console.error("Failed to load identities:", err);
+        console.error("Failed to load data:", err);
       } finally {
         setLoading(false);
       }
@@ -66,12 +80,15 @@ export function VoiceGenerator() {
   }, [identities, search]);
 
   const selectedPerson = identities.find((id) => id.id === selectedId);
+  const targetAgent = agents.find((a) => a.id === targetAgentId);
 
   async function handleGenerate() {
     if (!selectedId) return;
     setAnalyzing(true);
     setError(null);
     setResult(null);
+    setApplied(false);
+    setTargetAgentId(null);
 
     try {
       const data = await api.post<VoiceResult>("tools/generate-voice", {
@@ -80,7 +97,6 @@ export function VoiceGenerator() {
       setResult(data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Analysis failed";
-      // Try to extract a better error message from the JSON body
       try {
         const parsed = JSON.parse(msg) as { error?: string };
         setError(parsed.error || msg);
@@ -89,6 +105,35 @@ export function VoiceGenerator() {
       }
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleApplyToAgent() {
+    if (!targetAgentId || !result) return;
+    setApplying(true);
+    setError(null);
+
+    try {
+      const agent = agents.find((a) => a.id === targetAgentId);
+      if (!agent) throw new Error("Agent not found");
+
+      const updated: AgentDefinition = {
+        ...agent,
+        persona: {
+          ...agent.persona,
+          voice: result.voice,
+          personality: result.personality,
+          outputStyle: result.outputStyle,
+        },
+      };
+
+      await api.put(`agents/${targetAgentId}`, updated);
+      setApplied(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to apply";
+      setError(msg);
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -103,6 +148,8 @@ export function VoiceGenerator() {
     setResult(null);
     setError(null);
     setSearch("");
+    setApplied(false);
+    setTargetAgentId(null);
   }
 
   if (loading) {
@@ -128,7 +175,8 @@ export function VoiceGenerator() {
             Voice Generator
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Analyze Slack messages to generate agent persona fields
+            Analyze Slack messages to generate voice, personality, and output
+            style
           </p>
         </div>
       </div>
@@ -185,6 +233,92 @@ export function VoiceGenerator() {
             copied={copied}
             onCopy={handleCopy}
           />
+
+          {/* Apply to Agent section */}
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Apply to Agent</span>
+                  <span className="text-xs text-muted-foreground">
+                    — sets voice, personality &amp; output style
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Agent selector dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setAgentDropdownOpen(!agentDropdownOpen)}
+                      className="flex h-9 min-w-[180px] items-center justify-between rounded-md border border-input bg-background px-3 text-sm transition-colors hover:bg-accent"
+                    >
+                      <span className={targetAgent ? "" : "text-muted-foreground"}>
+                        {targetAgent ? targetAgent.name : "Select agent…"}
+                      </span>
+                      <ChevronDown className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                    {agentDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setAgentDropdownOpen(false)}
+                        />
+                        <div className="absolute right-0 z-50 mt-1 max-h-60 w-56 overflow-auto rounded-md border border-border bg-popover shadow-lg">
+                          {agents.map((agent) => (
+                            <button
+                              key={agent.id}
+                              onClick={() => {
+                                setTargetAgentId(agent.id);
+                                setAgentDropdownOpen(false);
+                                setApplied(false);
+                              }}
+                              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${
+                                targetAgentId === agent.id ? "bg-accent" : ""
+                              }`}
+                            >
+                              <span className="truncate">{agent.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    onClick={handleApplyToAgent}
+                    disabled={!targetAgentId || applying || applied}
+                  >
+                    {applying ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        Applying...
+                      </>
+                    ) : applied ? (
+                      <>
+                        <Check className="mr-1.5 h-3.5 w-3.5" />
+                        Applied
+                      </>
+                    ) : (
+                      "Apply"
+                    )}
+                  </Button>
+                </div>
+              </div>
+              {applied && targetAgent && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Voice, personality, and output style applied to{" "}
+                  <Link
+                    to={`/agents/${targetAgent.id}`}
+                    className="underline hover:text-foreground"
+                  >
+                    {targetAgent.name}
+                  </Link>
+                  . Changes take effect on the next report or chat.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <p className="text-xs text-muted-foreground">
             Model: {result.model} &middot; Tokens: {result.tokens.input} in /{" "}
@@ -244,8 +378,8 @@ export function VoiceGenerator() {
                       </>
                     ) : (
                       <>
-                        <Mic className="mr-1.5 h-3.5 w-3.5" />
-                        Generate Voice Profile
+                        <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                        Generate Persona
                       </>
                     )}
                   </Button>
@@ -327,6 +461,15 @@ export function VoiceGenerator() {
             </Card>
           )}
         </>
+      )}
+
+      {/* Error in results view */}
+      {result && error && (
+        <Card className="border-destructive/50">
+          <CardContent className="py-4 text-sm text-destructive">
+            {error}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
