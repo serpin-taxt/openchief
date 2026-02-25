@@ -45,5 +45,5 @@
     ]
   },
   "enabled": true,
-  "tools": ["query_events"]
+  "tools": ["query_events", "twitter_search"]
 }

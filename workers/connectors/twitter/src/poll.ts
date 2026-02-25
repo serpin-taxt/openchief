@@ -45,6 +45,33 @@ export interface PollResult {
   totalEvents: number;
 }
 
+// --- Config Helpers ----------------------------------------------------------
+
+/** Read monitored accounts: KV first, env var fallback. */
+export async function getMonitoredAccounts(
+  kv: KVNamespace,
+  envAccounts: string
+): Promise<string[]> {
+  const kvAccounts = await kv.get("twitter:config:monitored_accounts");
+  const raw = kvAccounts || envAccounts;
+  return raw
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean);
+}
+
+/** Read search queries: KV first, env var fallback. */
+function getSearchQueries(
+  kvQueries: string | null,
+  envQueries: string | undefined
+): string[] {
+  const raw = kvQueries || envQueries || "";
+  return raw
+    .split("|")
+    .map((q) => q.trim())
+    .filter(Boolean);
+}
+
 // --- Main Poll Function ------------------------------------------------------
 
 export async function pollTwitter(
@@ -59,25 +86,20 @@ export async function pollTwitter(
   },
   options?: { backfill?: boolean }
 ): Promise<PollResult> {
-  // Bearer tokens from the X Developer Console are sometimes URL-encoded
-  const token = decodeURIComponent(env.X_BEARER_TOKEN);
-  const client = new TwitterClient(token);
+  const client = new TwitterClient(env.X_BEARER_TOKEN);
   const now = new Date().toISOString();
   const allEvents: OpenChiefEvent[] = [];
 
-  // Parse monitored accounts from env
-  const accounts = env.X_MONITORED_ACCOUNTS
-    .split(",")
-    .map((a) => a.trim())
-    .filter(Boolean);
+  // Read monitored accounts: KV first (dashboard-managed), env var fallback
+  const accounts = await getMonitoredAccounts(env.KV, env.X_MONITORED_ACCOUNTS);
 
   if (accounts.length === 0) {
     console.log("No monitored accounts configured, skipping poll");
     return { accounts: [], search: { queries: 0, events: 0 }, totalEvents: 0 };
   }
 
-  // Sync config to KV so the app dashboard can display it
-  await syncConfigToKV(env.KV, env.X_MONITORED_ACCOUNTS, env.X_SEARCH_QUERIES);
+  // Seed KV from env vars on first run (if KV is empty)
+  await seedConfigToKV(env.KV, env.X_MONITORED_ACCOUNTS, env.X_SEARCH_QUERIES);
 
   const accountResults: PollResult["accounts"] = [];
 
@@ -205,11 +227,9 @@ export async function pollTwitter(
   // -- Search Queries ---------------------------------------------------------
 
   let searchEvents: OpenChiefEvent[] = [];
-  // Search queries are pipe-delimited (|) since queries may contain commas
-  const searchQueries = (env.X_SEARCH_QUERIES || "")
-    .split("|")
-    .map((q) => q.trim())
-    .filter(Boolean);
+  // Read search queries: KV first (dashboard-managed), env var fallback
+  const kvQueries = await env.KV.get("twitter:config:search_queries");
+  const searchQueries = getSearchQueries(kvQueries, env.X_SEARCH_QUERIES);
 
   for (const query of searchQueries) {
     const queryHash = simpleHash(query);
@@ -281,22 +301,26 @@ function simpleHash(str: string): string {
   return Math.abs(hash).toString(36);
 }
 
-/** Sync connector config to shared KV so the app dashboard can display it. */
-async function syncConfigToKV(
+/** Seed KV from env vars on first run only (if KV has no values yet). */
+async function seedConfigToKV(
   kv: KVNamespace,
   monitoredAccounts: string,
   searchQueries?: string
 ): Promise<void> {
   try {
-    await kv.put("twitter:config:monitored_accounts", monitoredAccounts, {
-      expirationTtl: 7 * 24 * 60 * 60,
-    });
-    if (searchQueries) {
+    const existingAccounts = await kv.get("twitter:config:monitored_accounts");
+    if (!existingAccounts && monitoredAccounts) {
+      await kv.put("twitter:config:monitored_accounts", monitoredAccounts, {
+        expirationTtl: 365 * 24 * 60 * 60,
+      });
+    }
+    const existingQueries = await kv.get("twitter:config:search_queries");
+    if (!existingQueries && searchQueries) {
       await kv.put("twitter:config:search_queries", searchQueries, {
-        expirationTtl: 7 * 24 * 60 * 60,
+        expirationTtl: 365 * 24 * 60 * 60,
       });
     }
   } catch (err) {
-    console.error("Failed to sync config to KV:", err);
+    console.error("Failed to seed config to KV:", err);
   }
 }

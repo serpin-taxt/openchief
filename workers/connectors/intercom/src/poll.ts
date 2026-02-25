@@ -64,18 +64,41 @@ export async function runPollTasks(env: Env): Promise<{ conversationsProcessed: 
 
 /**
  * Deep backfill — fetch conversations from the last 7 days.
+ * Deduplicates against D1 to avoid re-enqueuing conversations that already exist.
  */
-export async function runDeepBackfill(env: Env): Promise<{ conversationsProcessed: number; eventsEnqueued: number }> {
+export async function runDeepBackfill(env: Env): Promise<{ conversationsProcessed: number; eventsEnqueued: number; skippedExisting: number }> {
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
   let conversationsProcessed = 0;
   let eventsEnqueued = 0;
+  let skippedExisting = 0;
   let cursor: string | undefined;
+
+  // Pre-load existing conversation IDs from D1 to avoid duplicates
+  const existingIds = new Set<string>();
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT json_extract(payload, '$.conversationId') as cid
+       FROM events WHERE source = 'intercom' AND timestamp > ?`
+    ).bind(new Date(sevenDaysAgo * 1000).toISOString()).all<{ cid: string }>();
+    for (const row of rows.results) {
+      if (row.cid) existingIds.add(row.cid);
+    }
+  } catch {
+    // If D1 query fails, proceed without dedup — better to have duplicates than miss data
+    console.warn("Could not pre-load existing conversation IDs for dedup");
+  }
 
   do {
     const result = await searchConversations(env.INTERCOM_ACCESS_TOKEN, sevenDaysAgo, cursor);
 
     for (const convo of result.conversations) {
       conversationsProcessed++;
+
+      // Skip if we already have an event for this conversation
+      if (existingIds.has(convo.id)) {
+        skippedExisting++;
+        continue;
+      }
 
       // Fetch full conversation with parts for richer data
       let detail: IntercomConversation | IntercomConversationDetail;
@@ -89,6 +112,7 @@ export async function runDeepBackfill(env: Env): Promise<{ conversationsProcesse
       if (event) {
         await env.EVENTS_QUEUE.send(event);
         eventsEnqueued++;
+        existingIds.add(convo.id); // Track within this run too
       }
     }
 
@@ -98,24 +122,25 @@ export async function runDeepBackfill(env: Env): Promise<{ conversationsProcesse
   // Update cursor to now
   await env.KV.put(POLL_CURSOR_KEY, Math.floor(Date.now() / 1000).toString());
 
-  return { conversationsProcessed, eventsEnqueued };
+  return { conversationsProcessed, eventsEnqueued, skippedExisting };
 }
 
 /**
  * Build a condensed transcript from conversation parts.
- * Filters out bot auto-greetings and internal notes, keeps user + admin messages.
- * Returns up to ~600 chars of meaningful chat content.
+ * Filters out bot auto-greetings and system actions, keeps user + admin messages + notes.
+ * Returns up to ~2000 chars of meaningful chat content so agents get real context
+ * about what customers are saying across the full conversation.
  */
 function buildTranscript(convo: IntercomConversation | IntercomConversationDetail): string {
   const detail = convo as IntercomConversationDetail;
   const rawParts: IntercomConversationPart[] = detail.conversation_parts?.conversation_parts || [];
   if (rawParts.length === 0) return "";
 
-  // Filter to meaningful messages — skip assignments, notes, system actions
+  // Filter to meaningful messages — skip assignments, system actions
   const messageParts = rawParts.filter((p) => {
     if (!p.body) return false;
     const partType = p.part_type;
-    // Keep: comment (user/admin messages), note (admin notes are useful context)
+    // Keep: comment (user/admin messages), note (admin internal notes are useful context)
     // Skip: assignment, open, close, etc.
     return partType === "comment" || partType === "note";
   });
@@ -123,7 +148,7 @@ function buildTranscript(convo: IntercomConversation | IntercomConversationDetai
   if (messageParts.length === 0) return "";
 
   const lines: string[] = [];
-  let charBudget = 600;
+  let charBudget = 2000;
 
   for (const part of messageParts) {
     if (charBudget <= 0) break;
@@ -134,13 +159,20 @@ function buildTranscript(convo: IntercomConversation | IntercomConversationDetai
 
     const role = part.author.type === "admin" || part.author.type === "bot" ? "AGENT" : "USER";
     const name = part.author.name || role;
-    const truncBody = plainBody.length > 150 ? plainBody.slice(0, 147) + "..." : plainBody;
-    const line = `[${role}] ${name}: ${truncBody}`;
+    const isNote = part.part_type === "note";
+    const prefix = isNote ? `[NOTE] ${name}` : `[${role}] ${name}`;
+    const truncBody = plainBody.length > 300 ? plainBody.slice(0, 297) + "..." : plainBody;
+    const line = `${prefix}: ${truncBody}`;
     lines.push(line);
     charBudget -= line.length;
   }
 
-  return lines.length > 0 ? `\nTRANSCRIPT:\n${lines.join("\n")}` : "";
+  if (lines.length === 0) return "";
+
+  const totalParts = messageParts.length;
+  const shown = lines.length;
+  const truncNote = shown < totalParts ? ` (showing ${shown}/${totalParts} messages)` : "";
+  return `\nTRANSCRIPT${truncNote}:\n${lines.join("\n")}`;
 }
 
 /**

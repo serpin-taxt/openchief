@@ -114,6 +114,31 @@ export class TwitterClient {
     return body.data ?? null;
   }
 
+  // --- Single Tweet ----------------------------------------------------------
+
+  /** Fetch a single tweet by ID with full metrics and author info. */
+  async getTweet(
+    tweetId: string
+  ): Promise<{ tweet: Tweet; users: TwitterUser[] } | null> {
+    const url = `${BASE_URL}/tweets/${tweetId}?tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
+    const response = await this.fetchWithRetry(url);
+
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      const text = await response.text();
+      throw new Error(
+        `X API error ${response.status} on tweet lookup: ${text}`
+      );
+    }
+
+    const body = (await response.json()) as {
+      data?: Tweet;
+      includes?: { users?: TwitterUser[] };
+    };
+    if (!body.data) return null;
+    return { tweet: body.data, users: body.includes?.users || [] };
+  }
+
   // --- Tweets ----------------------------------------------------------------
 
   /** Get tweets posted by a user. */
