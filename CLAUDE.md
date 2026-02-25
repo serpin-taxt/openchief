@@ -408,6 +408,26 @@ OpenChief is an open-source package — the source repo (`~/dev/openchief`) uses
 
 Real Cloudflare resource IDs and deploy vars are stored in `.claude/CLAUDE.md` (gitignored). Check there or read from the existing deploy dir `wrangler.jsonc` files. Never guess or invent resource IDs.
 
+## Auth (Worker HTTP Endpoints)
+
+Every worker with HTTP endpoints **must** authenticate non-health-check routes:
+
+1. Add `ADMIN_SECRET: string` to the worker's `Env` interface
+2. Import `requireAdmin` from `@openchief/shared` and guard routes:
+   ```typescript
+   import { requireAdmin } from "@openchief/shared";
+   // ...
+   const denied = requireAdmin(request, env.ADMIN_SECRET);
+   if (denied) return denied;
+   ```
+3. Health check routes (`GET /`, `GET /health`) remain public — they return before the auth guard
+4. Webhook endpoints use signature verification (HMAC-SHA256, Ed25519) instead of Bearer tokens
+5. OAuth callback endpoints are necessarily public (state-verified by the OAuth provider)
+6. Add `{ name: "ADMIN_SECRET", label: "Admin Secret", secret: true }` to `CONNECTOR_CONFIGS` in the dashboard worker
+7. Set the secret via `wrangler secret put ADMIN_SECRET`
+
+The dashboard proxies to connectors and the runtime via service bindings, injecting `Authorization: Bearer {secret}` from KV or wrangler secrets. Direct access to any worker's `*.workers.dev` URL without a valid Bearer token returns 401.
+
 ## Code Style
 
 - TypeScript strict mode everywhere
