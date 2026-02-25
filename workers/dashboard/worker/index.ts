@@ -33,6 +33,8 @@ interface Env {
   REPORT_TIME_UTC_HOUR?: string;
   /** IANA timezone for report display (e.g. "America/Chicago"). */
   REPORT_TIMEZONE?: string;
+  /** Bearer token for authenticating to the runtime worker's HTTP endpoints (must match runtime's ADMIN_SECRET) */
+  RUNTIME_ADMIN_SECRET?: string;
   /** Connector service bindings — one per enabled connector (e.g. CONNECTOR_SLACK, CONNECTOR_GITHUB) */
   [key: `CONNECTOR_${string}`]: Fetcher | undefined;
 }
@@ -151,6 +153,7 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         description:
           "Optional label for this project (used in event metadata). Defaults to 'default'.",
       },
+      { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
   },
   intercom: {
@@ -229,6 +232,7 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
     workerName: "openchief-connector-notion",
     fields: [
       { name: "NOTION_API_KEY", label: "Integration Token", secret: true, placeholder: "ntn_..." },
+      { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
   },
   jira: {
@@ -335,6 +339,15 @@ function json(data: unknown, status = 200, headers?: Record<string, string>): Re
 
 function errorJson(message: string, status = 400): Response {
   return json({ error: message }, status);
+}
+
+/** Build headers for AGENT_RUNTIME service binding calls, injecting Bearer auth if configured. */
+function runtimeHeaders(env: Env, extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (env.RUNTIME_ADMIN_SECRET) {
+    headers["Authorization"] = `Bearer ${env.RUNTIME_ADMIN_SECRET}`;
+  }
+  return headers;
 }
 
 function maskValue(value: string): string {
@@ -1597,9 +1610,7 @@ async function handleChat(
   const runtimeUrl = `https://openchief-runtime/chat/${agentId}`;
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: runtimeHeaders(env, { "Content-Type": "application/json" }),
     body: JSON.stringify({ message, userEmail, userName }),
   });
 
@@ -1627,9 +1638,7 @@ async function handleChatHistory(
 
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "GET",
-    headers: {
-      "X-User-Email": userEmail,
-    },
+    headers: runtimeHeaders(env, { "X-User-Email": userEmail }),
   });
 
   const data = await runtimeResponse.text();
@@ -1701,10 +1710,10 @@ async function handleTrigger(
 
   const runtimeResponse = await env.AGENT_RUNTIME.fetch(runtimeUrl, {
     method: "POST",
-    headers: {
+    headers: runtimeHeaders(env, {
       "Content-Type": "application/json",
       "X-User-Email": await getUserEmail(request, env),
-    },
+    }),
   });
 
   const data = await runtimeResponse.text();
@@ -3214,7 +3223,7 @@ async function handleGenerateVoice(
     "https://openchief-runtime/tools/generate-voice",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: runtimeHeaders(env, { "Content-Type": "application/json" }),
       body: JSON.stringify({ personName, messages }),
     },
   );

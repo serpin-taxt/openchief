@@ -1,5 +1,6 @@
 import { AgentDurableObject } from "./agent-do";
 import { backfillReports } from "./rag";
+import { requireAdmin } from "@openchief/shared";
 
 export { AgentDurableObject };
 
@@ -8,6 +9,7 @@ interface Env {
   KV: KVNamespace;
   AGENT_DO: DurableObjectNamespace<AgentDurableObject>;
   ANTHROPIC_API_KEY: string;
+  ADMIN_SECRET?: string;
   VECTORIZE?: VectorizeIndex;
   AI?: Ai;
   ORG_NAME?: string;
@@ -53,6 +55,10 @@ export default {
         status: "ok",
       });
     }
+
+    // All non-health-check routes require admin auth
+    const denied = requireAdmin(request, env.ADMIN_SECRET);
+    if (denied) return denied;
 
     // POST /trigger/:agentId/:reportType — manually trigger a report
     const triggerMatch = path.match(/^\/trigger\/([^/]+)\/([^/]+)$/);

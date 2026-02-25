@@ -367,7 +367,7 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
       {
         step: "Set the OAuth callback URL",
         detail:
-          "In the app settings, set the Callback URL to your Figma connector worker URL + /oauth/callback (e.g. https://openchief-internal-connector-figma.trust-ethos.workers.dev/oauth/callback). This is used when authenticating via OAuth.",
+          "In the app settings, set the Callback URL to your Figma connector worker URL + /oauth/callback (e.g. https://your-figma-connector.your-team.workers.dev/oauth/callback). This is used when authenticating via OAuth.",
       },
       {
         step: "Set OAuth scopes",

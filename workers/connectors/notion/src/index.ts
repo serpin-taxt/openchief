@@ -6,7 +6,7 @@ interface Env {
   EVENTS_QUEUE: Queue;
   NOTION_API_KEY: string;
   POLL_CURSOR: KVNamespace;
-  ADMIN_SECRET?: string;
+  ADMIN_SECRET: string;
 }
 
 const CURSOR_KEY = "notion:last-poll";

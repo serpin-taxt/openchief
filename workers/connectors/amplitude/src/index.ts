@@ -10,12 +10,14 @@
 
 import { runPollTasks } from "./poll";
 import { normalizeMetric, type MetricSnapshot } from "./normalize";
+import { requireAdmin } from "@openchief/shared";
 
 interface Env {
   EVENTS_QUEUE: Queue;
   AMPLITUDE_API_KEY: string;
   AMPLITUDE_SECRET_KEY: string;
   AMPLITUDE_PROJECT_NAME?: string;
+  ADMIN_SECRET: string;
   KV: KVNamespace;
   DB: D1Database;
 }
@@ -30,6 +32,8 @@ export default {
 
     // POST /poll — manual trigger for metric fetch
     if (url.pathname === "/poll" && request.method === "POST") {
+      const denied = requireAdmin(request, env.ADMIN_SECRET);
+      if (denied) return denied;
       try {
         const result = await runPollTasks(env);
         return jsonResponse({ ok: true, result });
@@ -42,6 +46,8 @@ export default {
     // POST /webhook — accept manual metric pushes
     // Useful for custom dashboards or scripts pushing metrics
     if (url.pathname === "/webhook" && request.method === "POST") {
+      const denied = requireAdmin(request, env.ADMIN_SECRET);
+      if (denied) return denied;
       try {
         const body = (await request.json()) as {
           metrics: MetricSnapshot[];
