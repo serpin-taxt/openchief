@@ -380,32 +380,33 @@ Regardless of auth mode, user email is resolved via the `identity_mappings` D1 t
 
 ## Development & Deploy Workflow
 
-OpenChief is an open-source package — the source repo (`~/dev/openchief`) uses placeholder values for all Cloudflare resource IDs. A separate test directory (`~/dev/openchief-test`) holds the real deployed instance with actual resource IDs. **Never deploy directly from the source repo.**
+OpenChief is an open-source package — the source repo (`~/dev/openchief`) uses placeholder values for all Cloudflare resource IDs. A separate deploy directory (`~/dev/openchief-deploy`) holds the real deployed instance with actual resource IDs. **Never deploy directly from the source repo.**
 
 ### Workflow
 
 1. **Edit** code in `~/dev/openchief/` (the source repo)
 2. **Build** from the source repo: `pnpm build`
-3. **Copy** the changed worker(s) to the test directory:
+3. **Copy** the changed worker(s) to the deploy directory:
    ```bash
-   rsync -av --exclude node_modules ~/dev/openchief/workers/<worker>/ ~/dev/openchief-test/workers/<worker>/
+   rsync -av --exclude node_modules --exclude .wrangler --exclude wrangler.jsonc ~/dev/openchief/workers/<worker>/ ~/dev/openchief-deploy/workers/<worker>/
    ```
-4. **Deploy** from the test directory:
+   **IMPORTANT:** Always exclude `wrangler.jsonc` — the deploy directory has real Cloudflare resource IDs and secrets that must never be overwritten by the source repo's placeholders.
+4. **Deploy** from the deploy directory:
    ```bash
-   cd ~/dev/openchief-test/workers/<worker> && npx wrangler deploy
+   cd ~/dev/openchief-deploy/workers/<worker> && npx wrangler deploy
    ```
 5. **Commit & push** from the source repo (which keeps placeholder values)
 
 ### Why Two Directories
 
 - The source repo is open-source and must never contain real account IDs, database IDs, KV namespace IDs, or secrets
-- The test directory has `wrangler.jsonc` files with real Cloudflare resource IDs filled in
-- The Vite/Cloudflare build plugin for the dashboard generates a `dist/` config that references the source directory — if deploy configs get stale, delete `.wrangler/deploy/config.json` in the test directory and use a manually configured `wrangler.jsonc` with real IDs
-- The test directory is not a git repo — it's a deployment staging area only
+- The deploy directory has `wrangler.jsonc` files with real Cloudflare resource IDs filled in
+- The Vite/Cloudflare build plugin for the dashboard generates a `dist/` config that references the source directory — if deploy configs get stale, delete `.wrangler/deploy/config.json` in the deploy directory and use a manually configured `wrangler.jsonc` with real IDs
+- The deploy directory is not a git repo — it's a deployment staging area only
 
-### Test Directory Resource IDs
+### Deploy Directory Resource IDs
 
-Real Cloudflare resource IDs for `~/dev/openchief-test/` are stored in `.claude/settings.local.json` (gitignored). Check there or run `pnpm run setup` in the test directory to see current values.
+Real Cloudflare resource IDs and deploy vars are stored in `.claude/CLAUDE.md` (gitignored). Check there or read from the existing deploy dir `wrangler.jsonc` files. Never guess or invent resource IDs.
 
 ## Code Style
 

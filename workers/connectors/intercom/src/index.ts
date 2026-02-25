@@ -11,6 +11,36 @@ import { verifyIntercomSignature } from "./webhook-verify";
 import { normalizeIntercomEvent, type IntercomWebhookPayload } from "./normalize";
 import { runPollTasks, runDeepBackfill } from "./poll";
 
+/**
+ * Default webhook topics to subscribe to in the Intercom Developer Hub.
+ * These cover the most useful real-time events for business intelligence.
+ */
+const DEFAULT_WEBHOOK_TOPICS = [
+  "conversation.user.replied",
+  "conversation.admin.replied",
+  "conversation.admin.noted",
+  "conversation.admin.closed",
+  "ticket.created",
+] as const;
+
+/**
+ * All webhook topics the connector can handle (superset of defaults).
+ */
+const ALL_SUPPORTED_TOPICS = [
+  ...DEFAULT_WEBHOOK_TOPICS,
+  "conversation.user.created",
+  "conversation.admin.single.created",
+  "conversation.admin.assigned",
+  "conversation.admin.opened",
+  "conversation.admin.snoozed",
+  "conversation.admin.unsnoozed",
+  "conversation.rating.added",
+  "conversation.rating.remarked",
+  "ticket.state.updated",
+  "contact.created",
+  "user.created",
+] as const;
+
 interface Env {
   EVENTS_QUEUE: Queue;
   INTERCOM_ACCESS_TOKEN: string;
@@ -60,6 +90,65 @@ export default {
         const msg = err instanceof Error ? err.message : "Backfill failed";
         return jsonResponse({ ok: false, error: msg }, 500);
       }
+    }
+
+    // GET /webhook-setup — returns the webhook URL and topics to configure
+    if (url.pathname === "/webhook-setup" && request.method === "GET") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+
+      const webhookUrl = new URL("/webhook", url.origin).toString();
+      return jsonResponse({
+        instructions: "Configure these in your Intercom Developer Hub → Your App → Webhooks",
+        webhookUrl,
+        defaultTopics: [...DEFAULT_WEBHOOK_TOPICS],
+        allSupportedTopics: [...ALL_SUPPORTED_TOPICS],
+        docsUrl: "https://developers.intercom.com/docs/webhooks/setting-up-webhooks",
+      });
+    }
+
+    // GET /webhook-topics — returns all topics with selection state
+    if (url.pathname === "/webhook-topics" && request.method === "GET") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+
+      const storedRaw = await env.KV.get("intercom:webhook_topics");
+      const selected: string[] = storedRaw
+        ? JSON.parse(storedRaw)
+        : [...DEFAULT_WEBHOOK_TOPICS];
+      const selectedSet = new Set(selected);
+
+      return jsonResponse({
+        ok: true,
+        topics: ALL_SUPPORTED_TOPICS.map((topic) => ({
+          topic,
+          selected: selectedSet.has(topic),
+          isDefault: (DEFAULT_WEBHOOK_TOPICS as readonly string[]).includes(topic),
+        })),
+        selected,
+      });
+    }
+
+    // PUT /webhook-topics — save topic selection
+    if (url.pathname === "/webhook-topics" && request.method === "PUT") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+
+      const body = await request.json() as { topics: string[] };
+      if (!Array.isArray(body.topics)) {
+        return jsonResponse({ ok: false, error: "topics must be an array" }, 400);
+      }
+
+      // Validate all topics are in ALL_SUPPORTED_TOPICS
+      const validTopics = new Set<string>(ALL_SUPPORTED_TOPICS);
+      const invalid = body.topics.filter((t) => !validTopics.has(t));
+      if (invalid.length > 0) {
+        return jsonResponse({ ok: false, error: `Invalid topics: ${invalid.join(", ")}` }, 400);
+      }
+
+      await env.KV.put("intercom:webhook_topics", JSON.stringify(body.topics));
+
+      return jsonResponse({ ok: true, selected: body.topics });
     }
 
     // POST /webhook — Intercom webhook endpoint
@@ -126,6 +215,17 @@ async function handleWebhookEvent(
   env: Env
 ): Promise<void> {
   try {
+    // Check topic filter — drop events for topics the user hasn't selected
+    const storedTopics = await env.KV.get("intercom:webhook_topics");
+    if (storedTopics) {
+      const selectedTopics: string[] = JSON.parse(storedTopics);
+      if (!selectedTopics.includes(payload.topic)) {
+        console.log(`Dropping unselected Intercom topic: ${payload.topic}`);
+        return;
+      }
+    }
+    // If no stored topics, accept all (backwards compat / first-time setup)
+
     const event = normalizeIntercomEvent(payload);
     if (!event) return;
 

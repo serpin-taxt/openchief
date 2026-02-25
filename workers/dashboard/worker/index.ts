@@ -46,6 +46,7 @@ interface ConnectorField {
   label: string;
   secret: boolean;
   placeholder?: string;
+  description?: string;
 }
 
 interface ConnectorConfig {
@@ -127,18 +128,55 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
     displayName: "Amplitude",
     workerName: "openchief-connector-amplitude",
     fields: [
-      { name: "AMPLITUDE_API_KEY", label: "API Key", secret: true },
-      { name: "AMPLITUDE_SECRET_KEY", label: "Secret Key", secret: true },
-      { name: "AMPLITUDE_PROJECT_NAME", label: "Project Name", secret: false },
+      {
+        name: "AMPLITUDE_API_KEY",
+        label: "API Key",
+        secret: true,
+        placeholder: "a7b5cd1d85ac...",
+        description:
+          "From Settings → Projects → your project → General → API Key → Manage",
+      },
+      {
+        name: "AMPLITUDE_SECRET_KEY",
+        label: "Secret Key",
+        secret: true,
+        description:
+          "From Settings → Projects → your project → General → Secret Key → Show",
+      },
+      {
+        name: "AMPLITUDE_PROJECT_NAME",
+        label: "Project Name",
+        secret: false,
+        placeholder: "e.g. Ethos (prod)",
+        description:
+          "Optional label for this project (used in event metadata). Defaults to 'default'.",
+      },
     ],
   },
   intercom: {
     displayName: "Intercom",
     workerName: "openchief-connector-intercom",
     fields: [
-      { name: "INTERCOM_ACCESS_TOKEN", label: "Access Token", secret: true },
-      { name: "INTERCOM_CLIENT_SECRET", label: "Client Secret", secret: true },
-      { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
+      {
+        name: "INTERCOM_ACCESS_TOKEN",
+        label: "Access Token",
+        secret: true,
+        placeholder: "dG9rOjEyMzQ...",
+        description: "From your Intercom Developer Hub → Your App → Authentication",
+      },
+      {
+        name: "INTERCOM_CLIENT_SECRET",
+        label: "Client Secret",
+        secret: true,
+        description: "From Developer Hub → Basic Information. Used to verify webhook signatures (HMAC-SHA1).",
+      },
+      {
+        name: "ADMIN_SECRET",
+        label: "Admin Secret",
+        secret: true,
+        placeholder: "openssl rand -hex 32",
+        description: "A random secret you generate for authenticating admin endpoints (poll, backfill, webhook topics).",
+      },
     ],
   },
   twitter: {
@@ -754,6 +792,54 @@ export default {
         const source = decodeURIComponent(connProjectsMatch[1]);
         if (method === "GET") return handleGetConnectionProjects(env, source);
         if (method === "PUT") return handleUpdateConnectionProjects(request, env, source);
+      }
+
+      // /api/connections/:source/webhook-topics  (list + save webhook topic selection)
+      const connTopicsMatch = path.match(/^\/api\/connections\/([^/]+)\/webhook-topics$/);
+      if (connTopicsMatch) {
+        const source = decodeURIComponent(connTopicsMatch[1]);
+        if (method === "GET") return handleGetWebhookTopics(env, source);
+        if (method === "PUT") return handleUpdateWebhookTopics(request, env, source);
+      }
+
+      // /api/connections/:source/channels  (list + save selected channels)
+      const connChannelsMatch = path.match(/^\/api\/connections\/([^/]+)\/channels$/);
+      if (connChannelsMatch) {
+        const source = decodeURIComponent(connChannelsMatch[1]);
+        if (method === "GET") return handleGetConnectionChannels(env, source);
+        if (method === "PUT") return handleUpdateConnectionChannels(request, env, source);
+      }
+
+      // /api/connections/:source/accounts  (list + save monitored accounts)
+      const connAccountsMatch = path.match(/^\/api\/connections\/([^/]+)\/accounts$/);
+      if (connAccountsMatch) {
+        const source = decodeURIComponent(connAccountsMatch[1]);
+        if (method === "GET") return handleGetConnectionAccounts(env, source);
+        if (method === "PUT") return handleUpdateConnectionAccounts(request, env, source);
+      }
+
+      // /api/connections/:source/search-queries  (list + save search queries)
+      const connSearchQueriesMatch = path.match(/^\/api\/connections\/([^/]+)\/search-queries$/);
+      if (connSearchQueriesMatch) {
+        const source = decodeURIComponent(connSearchQueriesMatch[1]);
+        if (method === "GET") return handleGetConnectionSearchQueries(env, source);
+        if (method === "PUT") return handleUpdateConnectionSearchQueries(request, env, source);
+      }
+
+      // /api/connections/:source/oauth/status  (check OAuth token status)
+      const connOAuthStatusMatch = path.match(/^\/api\/connections\/([^/]+)\/oauth\/status$/);
+      if (connOAuthStatusMatch && method === "GET") {
+        const source = decodeURIComponent(connOAuthStatusMatch[1]);
+        return handleProxyGet(env, source, "/oauth/status");
+      }
+
+      // /api/connections/:source/oauth/authorize  (initiate OAuth flow)
+      const connOAuthAuthMatch = path.match(/^\/api\/connections\/([^/]+)\/oauth\/authorize$/);
+      if (connOAuthAuthMatch && method === "GET") {
+        const source = decodeURIComponent(connOAuthAuthMatch[1]);
+        const account = new URL(request.url).searchParams.get("account");
+        const targetPath = account ? `/oauth/authorize?account=${encodeURIComponent(account)}` : "/oauth/authorize";
+        return handleProxyGet(env, source, targetPath);
       }
 
       // -----------------------------------------------------------------------
@@ -1691,7 +1777,7 @@ async function handleGetConnectionSettings(
         secret: field.secret,
         required: true,
         placeholder: field.placeholder || null,
-        description: null,
+        description: field.description ?? null,
         configured: metadata !== null,
         maskedValue: metadata ? maskValue(metadata) : null,
         updatedAt: null,
@@ -2094,6 +2180,334 @@ async function handleUpdateConnectionProjects(
   try {
     const body = await request.text();
     const resp = await binding.fetch("https://connector/projects", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${adminSecret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    const respBody = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: respBody },
+        resp.status,
+      );
+    }
+    return new Response(respBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /api/connections/:source/webhook-topics — proxy to connector
+// ---------------------------------------------------------------------------
+
+async function handleGetWebhookTopics(
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(
+      `Service binding "${bindingKey}" not configured. Add it to the dashboard worker's wrangler.jsonc: { "binding": "${bindingKey}", "service": "${cfg.workerName}" }`,
+      500,
+    );
+  }
+
+  try {
+    const resp = await binding.fetch("https://connector/webhook-topics", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    const body = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: body },
+        resp.status,
+      );
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+async function handleUpdateWebhookTopics(
+  request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await binding.fetch("https://connector/webhook-topics", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${adminSecret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    const respBody = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: respBody },
+        resp.status,
+      );
+    }
+    return new Response(respBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /api/connections/:source/channels — proxy to connector /channels
+// ---------------------------------------------------------------------------
+
+async function handleGetConnectionChannels(
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const resp = await binding.fetch("https://connector/channels", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    const body = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: body },
+        resp.status,
+      );
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+async function handleUpdateConnectionChannels(
+  request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await binding.fetch("https://connector/channels", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${adminSecret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    const respBody = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: respBody },
+        resp.status,
+      );
+    }
+    return new Response(respBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connector: Accounts (GET + PUT)
+// ---------------------------------------------------------------------------
+async function handleGetConnectionAccounts(
+  env: Env,
+  source: string,
+): Promise<Response> {
+  return handleProxyGet(env, source, "/accounts");
+}
+
+async function handleUpdateConnectionAccounts(
+  request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  return handleProxyPut(request, env, source, "/accounts");
+}
+
+// ---------------------------------------------------------------------------
+// Connector: Search Queries (GET + PUT)
+// ---------------------------------------------------------------------------
+async function handleGetConnectionSearchQueries(
+  env: Env,
+  source: string,
+): Promise<Response> {
+  return handleProxyGet(env, source, "/search-queries");
+}
+
+async function handleUpdateConnectionSearchQueries(
+  request: Request,
+  env: Env,
+  source: string,
+): Promise<Response> {
+  return handleProxyPut(request, env, source, "/search-queries");
+}
+
+// ---------------------------------------------------------------------------
+// Generic connector proxy helpers
+// ---------------------------------------------------------------------------
+async function handleProxyGet(
+  env: Env,
+  source: string,
+  path: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const resp = await binding.fetch(`https://connector${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    const body = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: body },
+        resp.status,
+      );
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+async function handleProxyPut(
+  request: Request,
+  env: Env,
+  source: string,
+  path: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await binding.fetch(`https://connector${path}`, {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${adminSecret}`,

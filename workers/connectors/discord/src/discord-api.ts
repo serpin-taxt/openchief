@@ -117,6 +117,14 @@ export async function getChannelMessages(
   );
 }
 
+/** Get ALL channels in a guild (including categories for UI grouping) */
+export async function getAllGuildChannels(
+  guildId: string,
+  botToken: string
+): Promise<DiscordChannel[]> {
+  return discordFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`, botToken);
+}
+
 /** Get a specific channel */
 export async function getChannel(
   channelId: string,

@@ -24,31 +24,56 @@ interface Env {
   DB: D1Database;
 }
 
+type AllowedChannels =
+  | { type: "ids"; ids: Set<string> }
+  | { type: "names"; names: Set<string> }
+  | null;
+
 /**
- * Parse allowed channels from the DISCORD_ALLOWED_CHANNELS env var.
- * Returns null if not set (meaning all channels are allowed).
+ * Get allowed channels. Priority:
+ * 1. KV key `discord:allowed_channels` (JSON array of channel IDs from UI)
+ * 2. DISCORD_ALLOWED_CHANNELS env var (comma-separated channel names)
+ * 3. null (all channels allowed)
  */
-function parseAllowedChannels(env: Env): Set<string> | null {
-  if (!env.DISCORD_ALLOWED_CHANNELS) return null;
-  const names = env.DISCORD_ALLOWED_CHANNELS.split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (names.length === 0) return null;
-  return new Set(names);
+async function getAllowedChannels(env: Env): Promise<AllowedChannels> {
+  // Priority 1: KV-based selection (channel IDs from the UI picker)
+  const kvRaw = await env.KV.get("discord:allowed_channels");
+  if (kvRaw) {
+    try {
+      const ids = JSON.parse(kvRaw) as string[];
+      if (ids.length > 0) return { type: "ids", ids: new Set(ids) };
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Priority 2: Env var (channel names)
+  if (env.DISCORD_ALLOWED_CHANNELS) {
+    const names = env.DISCORD_ALLOWED_CHANNELS.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (names.length > 0) return { type: "names", names: new Set(names) };
+  }
+
+  return null;
 }
 
 function isRelevantChannel(
   channel: DiscordChannel,
-  allowedChannels: Set<string> | null
+  allowed: AllowedChannels
 ): boolean {
-  // If no allowed channels configured, allow all text channels
-  if (!allowedChannels) return true;
+  if (!allowed) return true;
 
+  if (allowed.type === "ids") {
+    return allowed.ids.has(channel.id);
+  }
+
+  // Name-based matching (legacy env var path)
   // Channel names may look like "emoji・name" — extract the part after "・"
   const bare = channel.name.includes("・")
     ? channel.name.split("・").pop()!
     : channel.name;
-  return allowedChannels.has(bare);
+  return allowed.names.has(bare);
 }
 
 /** Rate-limit helper: wait between Discord API calls */
@@ -64,7 +89,7 @@ export async function runPollTasks(
     env.DISCORD_GUILD_ID,
     env.DISCORD_BOT_TOKEN
   );
-  const allowedChannels = parseAllowedChannels(env);
+  const allowedChannels = await getAllowedChannels(env);
   const channels = allChannels.filter((ch) =>
     isRelevantChannel(ch, allowedChannels)
   );
@@ -132,7 +157,7 @@ export async function runDeepBackfill(
     env.DISCORD_GUILD_ID,
     env.DISCORD_BOT_TOKEN
   );
-  const allowedChannels = parseAllowedChannels(env);
+  const allowedChannels = await getAllowedChannels(env);
   const channels = allChannels.filter((ch) =>
     isRelevantChannel(ch, allowedChannels)
   );

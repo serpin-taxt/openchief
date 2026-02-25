@@ -10,7 +10,7 @@
 import { verifyDiscordSignature } from "./webhook-verify";
 import { normalizeMessage } from "./normalize";
 import { runPollTasks, runDeepBackfill } from "./poll";
-import { getGuild, getChannel } from "./discord-api";
+import { getGuild, getChannel, getAllGuildChannels } from "./discord-api";
 
 interface Env {
   EVENTS_QUEUE: Queue;
@@ -60,6 +60,78 @@ export default {
         return jsonResponse({ ok: true, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Backfill failed";
+        return jsonResponse({ ok: false, error: msg }, 500);
+      }
+    }
+
+    // GET /channels — list guild channels with selection state (admin only)
+    if (url.pathname === "/channels" && request.method === "GET") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const allChannels = await getAllGuildChannels(
+          env.DISCORD_GUILD_ID,
+          env.DISCORD_BOT_TOKEN
+        );
+
+        // Separate categories (type 4) from text channels (type 0, 5, 15)
+        const categories = allChannels.filter((c) => c.type === 4);
+        const textChannels = allChannels.filter((c) =>
+          [0, 5, 15].includes(c.type)
+        );
+
+        // Build category lookup map
+        const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+
+        // Read selected channel IDs from KV
+        const storedRaw = await env.KV.get("discord:allowed_channels");
+        const selected: string[] = storedRaw ? JSON.parse(storedRaw) : [];
+
+        // Map channels with category info
+        const channels = textChannels.map((ch) => ({
+          id: ch.id,
+          name: ch.name,
+          type: ch.type,
+          categoryId: ch.parent_id || null,
+          categoryName: ch.parent_id
+            ? categoryMap.get(ch.parent_id) || "Other"
+            : "No Category",
+        }));
+
+        return jsonResponse({ ok: true, channels, selected });
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to list channels";
+        return jsonResponse({ ok: false, error: msg }, 500);
+      }
+    }
+
+    // PUT /channels — save selected channel IDs (admin only)
+    if (url.pathname === "/channels" && request.method === "PUT") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const body = (await request.json()) as { channelIds: string[] };
+        if (!Array.isArray(body.channelIds)) {
+          return jsonResponse(
+            { ok: false, error: "channelIds must be an array" },
+            400
+          );
+        }
+        if (body.channelIds.length > 0) {
+          await env.KV.put(
+            "discord:allowed_channels",
+            JSON.stringify(body.channelIds)
+          );
+        } else {
+          await env.KV.delete("discord:allowed_channels");
+        }
+        return jsonResponse({ ok: true, channelIds: body.channelIds });
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Failed to save channel selection";
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }

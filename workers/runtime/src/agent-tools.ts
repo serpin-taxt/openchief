@@ -81,6 +81,29 @@ const ALL_TOOLS: Record<string, ToolDefinition> = {
     },
   },
 
+  twitter_search: {
+    name: "twitter_search",
+    description:
+      "Search Twitter/X events in the OpenChief database. " +
+      "Queries the events table filtered to source='twitter'. " +
+      "Useful for finding tweets, mentions, engagement snapshots, and search matches. " +
+      "The payload column (JSON) contains: tweet_id, text, author_username, author_name, url, " +
+      "like_count, retweet_count, reply_count, quote_count, impression_count. " +
+      "Event types: tweet.posted, tweet.reply, tweet.retweet, mention.received, search.match, account.engagement_snapshot. " +
+      "Always include WHERE source = 'twitter' and a LIMIT clause.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "SQL SELECT query against the events table. Must include source = 'twitter' filter and LIMIT clause.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+
   query_tasks: {
     name: "query_tasks",
     description:
@@ -142,6 +165,9 @@ export async function executeTool(
           env.GITHUB_TOKEN,
           env.GITHUB_REPO
         );
+
+      case "twitter_search":
+        return executeQueryEvents(input.query as string, env.DB);
 
       case "query_tasks":
         return executeQueryTasks(input.query as string, env.DB);

@@ -131,6 +131,41 @@ export interface FigmaFilesResponse {
   error?: string;
 }
 
+export interface DiscordChannel {
+  id: string;
+  name: string;
+  type: number;
+  categoryId: string | null;
+  categoryName: string;
+}
+
+export interface DiscordChannelsResponse {
+  ok: boolean;
+  channels: DiscordChannel[];
+  selected: string[];
+  error?: string;
+}
+
+// Twitter / X
+export interface TwitterAccount {
+  username: string;
+  userId: string | null;
+  oauthConnected: boolean;
+  expiresAt: number | null;
+}
+
+export interface TwitterAccountsResponse {
+  ok: boolean;
+  accounts: TwitterAccount[];
+  error?: string;
+}
+
+export interface TwitterSearchQueriesResponse {
+  ok: boolean;
+  queries: string[];
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
 // API helper
 // ---------------------------------------------------------------------------

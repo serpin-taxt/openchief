@@ -17,6 +17,12 @@ import {
   CheckCircle2,
   XCircle,
   FolderOpen,
+  Hash,
+  Twitter,
+  Search,
+  Plus,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
 import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 import {
@@ -27,6 +33,11 @@ import {
   type SyncResult,
   type FigmaFile,
   type FigmaFilesResponse,
+  type DiscordChannel,
+  type DiscordChannelsResponse,
+  type TwitterAccount,
+  type TwitterAccountsResponse,
+  type TwitterSearchQueriesResponse,
 } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -396,6 +407,155 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
     ],
     claudeCode:
       'You can automate the Figma App setup using Claude Code with browser automation. Use this prompt:\n\n"Set up a Figma app for OpenChief. Navigate to figma.com/developers/apps and create a new app called \'OpenChief\'. Set the Callback URL to https://MY_FIGMA_CONNECTOR_WORKER_URL/oauth/callback. Add these OAuth scopes: file_content:read, file_metadata:read, file_versions:read, file_comments:read, library_assets:read, library_content:read, team_library_content:read, file_dev_resources:read, projects:read, webhooks:read, webhooks:write. Copy the Client ID and Client Secret. Then generate a Personal Access Token at figma.com/developers/api#access-tokens with file:read and webhooks:write scopes. Set the wrangler secrets on the connector worker: FIGMA_TOKEN (personal token), FIGMA_PASSCODE (random hex: openssl rand -hex 20), FIGMA_CLIENT_ID, FIGMA_CLIENT_SECRET, and ADMIN_SECRET. Finally, initiate the OAuth flow by visiting https://MY_FIGMA_CONNECTOR_WORKER_URL/oauth/start?secret=MY_ADMIN_SECRET."',
+  },
+  intercom: {
+    manual: [
+      {
+        step: "Create an Intercom Developer App",
+        detail:
+          'Go to developers.intercom.com and sign in with your Intercom workspace admin account. Click "Your Apps" in the top nav, then "New App". Give it a name like "OpenChief" and select your workspace.',
+      },
+      {
+        step: "Configure the webhook URL",
+        detail:
+          'In your app settings, go to Webhooks. Set the Webhook URL to your Intercom connector worker URL followed by /webhook (e.g. https://your-worker.your-team.workers.dev/webhook).',
+      },
+      {
+        step: "Select webhook topics",
+        detail:
+          "In the Webhooks section, select the topics you want to receive in real-time. Recommended defaults: conversation.user.replied, conversation.admin.replied, conversation.admin.noted, conversation.admin.closed, ticket.created. You can also manage which topics OpenChief processes using the Webhook Topics section below.",
+      },
+      {
+        step: "Get your Access Token",
+        detail:
+          "Go to Authentication in the sidebar. Copy the Access Token — this is used by the connector to poll for conversation data via the Intercom API.",
+      },
+      {
+        step: "Get your Client Secret",
+        detail:
+          "Go to Basic Information in the sidebar. Copy the Client Secret — this is used to verify the HMAC-SHA1 signature on incoming webhooks, ensuring they genuinely came from Intercom.",
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          'Fill in the fields below with: Access Token, Client Secret, and an Admin Secret (generate one with: openssl rand -hex 32). The Admin Secret protects the connector\'s poll, backfill, and webhook topic management endpoints. The connector polls for conversations every 30 minutes automatically — webhooks are optional for richer real-time coverage.',
+      },
+    ],
+    claudeCode:
+      'You can automate the Intercom Developer Hub setup using Claude Code with browser automation. Use this prompt:\n\n"Set up an Intercom app for OpenChief. Navigate to developers.intercom.com, sign in, and create a new app called \'OpenChief\' for my workspace. Then go to Webhooks settings and set the webhook URL to MY_INTERCOM_CONNECTOR_WORKER_URL/webhook. Select these webhook topics: conversation.user.replied, conversation.admin.replied, conversation.admin.noted, conversation.admin.closed, ticket.created. Then go to Authentication and copy the Access Token. Go to Basic Information and copy the Client Secret. Finally, generate an Admin Secret (openssl rand -hex 32) and set all three as wrangler secrets on the connector worker:\n\necho \'TOKEN_VALUE\' | wrangler secret put INTERCOM_ACCESS_TOKEN\necho \'SECRET_VALUE\' | wrangler secret put INTERCOM_CLIENT_SECRET\necho \'ADMIN_VALUE\' | wrangler secret put ADMIN_SECRET"',
+  },
+  amplitude: {
+    manual: [
+      {
+        step: "Log in to Amplitude",
+        detail:
+          "Go to app.amplitude.com and sign in with your Amplitude account. Make sure you have admin access to the organization.",
+      },
+      {
+        step: "Navigate to Project Settings",
+        detail:
+          'Click the gear icon (⚙) in the top-right corner → Organization settings. In the sidebar, click "Projects", then click the project you want to connect (e.g. "Ethos (prod)").',
+      },
+      {
+        step: "Copy the API Key",
+        detail:
+          'On the project\'s General tab, find "API Key" and click "Manage". This opens the API Keys page where you can copy the key value. You can also generate a new API key here if needed.',
+      },
+      {
+        step: "Copy the Secret Key",
+        detail:
+          'Go back to Settings → Projects → your project → General. Find "Secret Key" and click "Show" to reveal it. Copy this value — it\'s used together with the API Key for Basic Auth on the Amplitude REST API.',
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Fill in the API Key, Secret Key, and optionally a Project Name (a label like the project name in Amplitude, e.g. \"Ethos (prod)\"). The connector polls Amplitude every 6 hours for DAU/WAU/MAU, user composition, and retention metrics — no webhooks needed.",
+      },
+    ],
+    claudeCode:
+      'Amplitude setup is simple — it\'s a pull-only connector with no webhooks. Use this prompt:\n\n"Set up Amplitude for OpenChief. Navigate to app.amplitude.com → Settings (gear icon top-right) → Organization settings → Projects → click my production project. On the General tab, copy the API Key (click Manage) and Secret Key (click Show). Then go to my OpenChief dashboard at MY_DASHBOARD_URL/connections/amplitude and enter the API Key and Secret Key in the Configuration section. Set the Project Name to the name of my Amplitude project. Click Save, then click Sync Humans to trigger the first data pull."',
+  },
+  discord: {
+    manual: [
+      {
+        step: "Create a Discord Application",
+        detail:
+          'Go to discord.com/developers/applications and click "New Application". Give it a name like "OpenChief" and accept the Terms of Service.',
+      },
+      {
+        step: "Create a Bot",
+        detail:
+          'In your application settings, go to "Bot" in the sidebar. Click "Add Bot" if prompted. Under Privileged Gateway Intents, enable "Message Content Intent" (required to read message text). Copy the Bot Token — you\'ll need it below.',
+      },
+      {
+        step: "Set bot permissions",
+        detail:
+          'Go to "OAuth2" → "URL Generator" in the sidebar. Under Scopes, check "bot". Under Bot Permissions, check: Read Messages/View Channels, Read Message History. Copy the generated URL at the bottom.',
+      },
+      {
+        step: "Invite the bot to your server",
+        detail:
+          "Open the generated URL in your browser. Select the Discord server (guild) you want to connect, and click Authorize. The bot will appear in the server member list.",
+      },
+      {
+        step: "Get the Guild ID and Public Key",
+        detail:
+          'In Discord, enable Developer Mode (User Settings → App Settings → Advanced → Developer Mode). Right-click your server name and click "Copy Server ID" — this is the Guild ID. Back in the Developer Portal, find the Public Key on the General Information page of your application.',
+      },
+      {
+        step: "Configure the webhook (optional)",
+        detail:
+          'In the Developer Portal, go to "General Information". Set the Interactions Endpoint URL to your Discord connector worker URL followed by /webhook (e.g. https://your-worker.workers.dev/webhook). Discord will verify the endpoint with a PING. This is optional — the connector primarily uses polling.',
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          'Fill in: Bot Token, Public Key, Guild ID, and an Admin Secret (generate one with: openssl rand -hex 32). After saving, expand the "Monitored Channels" section below to select which channels to watch. The bot polls every 30 minutes automatically.',
+      },
+    ],
+    claudeCode:
+      'You can automate the Discord bot setup using Claude Code with browser automation. Use this prompt:\n\n"Set up a Discord bot for OpenChief. Navigate to discord.com/developers/applications, create a new application called \'OpenChief\'. Go to Bot settings, enable Message Content Intent, and copy the Bot Token. Go to OAuth2 → URL Generator, select the \'bot\' scope, add Read Messages/View Channels and Read Message History permissions, then open the generated URL to invite the bot to my server. Copy the Guild ID (Server ID) from Discord and the Public Key from the Developer Portal. Then enter the Bot Token, Public Key, Guild ID, and a generated Admin Secret (openssl rand -hex 32) in the OpenChief dashboard at MY_DASHBOARD_URL/connections/discord."',
+  },
+  twitter: {
+    manual: [
+      {
+        step: "Create an X Developer App",
+        detail:
+          'Go to developer.x.com and sign in. Navigate to the Developer Portal → Projects & Apps → Create App (or add an app to an existing project). Name it "OpenChief", and select the appropriate access level (at minimum "Read").',
+      },
+      {
+        step: "Get the Bearer Token",
+        detail:
+          'In the app\'s "Keys and tokens" tab, find the "Bearer Token" under the App-only section. Click Generate (or Regenerate) and copy the token. This is used for reading public tweets and search.',
+      },
+      {
+        step: "Set up OAuth 2.0 (for mentions)",
+        detail:
+          'In app Settings → "User authentication settings" → click Set up. Choose App permissions: Read. App type: Confidential client. Set the Callback URL to https://YOUR_TWITTER_CONNECTOR_URL/oauth/callback. Set the Website URL to any valid URL. Save the settings.',
+      },
+      {
+        step: "Copy OAuth credentials",
+        detail:
+          "After saving OAuth settings, you'll be shown the Client ID and Client Secret. Copy both — you'll need them below. The Client Secret is only shown once, so save it securely.",
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Fill in: Bearer Token, OAuth Client ID, OAuth Client Secret, and an Admin Secret (generate one with: openssl rand -hex 32). Save the configuration.",
+      },
+      {
+        step: "Add monitored accounts",
+        detail:
+          'Expand the "Monitored Accounts" section below to add X accounts to track. Add your own account(s) and any competitor accounts. Own accounts can connect OAuth for mentions tracking; competitor accounts will track public tweets and engagement only.',
+      },
+      {
+        step: "Connect OAuth for own accounts",
+        detail:
+          'In the Monitored Accounts section, click "Connect OAuth" next to accounts you own. This opens an X authorization page — log in as that account and authorize. OAuth enables tracking mentions and replies directed at your account.',
+      },
+    ],
+    claudeCode:
+      'You can automate the X Developer App setup using Claude Code with browser automation. Use this prompt:\n\n"Set up an X/Twitter app for OpenChief. Navigate to developer.x.com → Developer Portal → Projects & Apps → Create a new app. Name it \'OpenChief\', select Read access. Go to Keys and tokens tab and generate a Bearer Token. Then go to User authentication settings → Set up → App permissions: Read, Type: Confidential client, Callback URL: https://MY_TWITTER_CONNECTOR_URL/oauth/callback, Website URL: https://github.com/openchief/openchief. Copy the Client ID and Client Secret. Then enter all credentials (Bearer Token, OAuth Client ID, OAuth Client Secret, and a generated Admin Secret via openssl rand -hex 32) in the OpenChief dashboard at MY_DASHBOARD_URL/connections/twitter."',
   },
 };
 
@@ -833,6 +993,899 @@ function FilePickerSection({ source }: { source: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Channel Picker (Discord)
+// ---------------------------------------------------------------------------
+
+function ChannelPickerSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [channels, setChannels] = useState<DiscordChannel[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [initialSelected, setInitialSelected] = useState<Set<string>>(
+    new Set(),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+
+  const loadChannels = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<DiscordChannelsResponse>(
+        `connections/${source}/channels`,
+      );
+      if (!data.ok) {
+        setError(data.error || "Failed to load channels");
+        return;
+      }
+      setChannels(data.channels);
+      const sel = new Set(data.selected);
+      setSelected(sel);
+      setInitialSelected(new Set(sel));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load channels",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && channels.length === 0 && !loading && !error) {
+      loadChannels();
+    }
+  }, [expanded, channels.length, loading, error, loadChannels]);
+
+  const hasChanges = useMemo(() => {
+    if (selected.size !== initialSelected.size) return true;
+    for (const id of selected) {
+      if (!initialSelected.has(id)) return true;
+    }
+    return false;
+  }, [selected, initialSelected]);
+
+  function toggleChannel(channelId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.put(`connections/${source}/channels`, {
+        channelIds: [...selected],
+      });
+      setInitialSelected(new Set(selected));
+    } catch (err) {
+      console.error("Failed to save channel selection:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filtered = channels.filter(
+    (ch) =>
+      ch.name.toLowerCase().includes(filter.toLowerCase()) ||
+      ch.categoryName.toLowerCase().includes(filter.toLowerCase()),
+  );
+
+  // Group by category for display
+  const grouped = useMemo(() => {
+    const groups: Record<
+      string,
+      { categoryName: string; channels: DiscordChannel[] }
+    > = {};
+    for (const ch of filtered) {
+      const key = ch.categoryId || "__none__";
+      if (!groups[key]) {
+        groups[key] = { categoryName: ch.categoryName, channels: [] };
+      }
+      groups[key].channels.push(ch);
+    }
+    return Object.entries(groups);
+  }, [filtered]);
+
+  const channelTypeLabel = (type: number): string => {
+    switch (type) {
+      case 5:
+        return "announcement";
+      case 15:
+        return "forum";
+      default:
+        return "";
+    }
+  };
+
+  return (
+    <Card>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-6 py-4 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Hash className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Monitored Channels</span>
+          <span className="text-xs text-muted-foreground">
+            {selected.size > 0
+              ? `${selected.size} channel${selected.size > 1 ? "s" : ""} selected`
+              : "Select which Discord channels to monitor"}
+          </span>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+      {expanded && (
+        <CardContent className="space-y-4 pt-0">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">
+                Loading channels from Discord...
+              </span>
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          ) : (
+            <>
+              {channels.length > 10 && (
+                <Input
+                  placeholder="Filter channels..."
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="text-sm"
+                />
+              )}
+              <div className="max-h-72 space-y-3 overflow-y-auto">
+                {grouped.map(([categoryId, group]) => (
+                  <div key={categoryId}>
+                    <p className="mb-1 px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {group.categoryName}
+                    </p>
+                    <div className="space-y-1">
+                      {group.channels.map((ch) => (
+                        <label
+                          key={ch.id}
+                          className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={selected.has(ch.id)}
+                            onCheckedChange={() => toggleChannel(ch.id)}
+                          />
+                          <span className="text-sm">#{ch.name}</span>
+                          {channelTypeLabel(ch.type) && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px]"
+                            >
+                              {channelTypeLabel(ch.type)}
+                            </Badge>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {filtered.length === 0 && (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    {channels.length === 0 ? "No channels found" : "No matches"}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between pt-2">
+                <p className="text-xs text-muted-foreground">
+                  {selected.size === 0
+                    ? "No channels selected — all channels will be monitored"
+                    : `${selected.size} of ${channels.length} channels will be monitored`}
+                </p>
+                <Button
+                  onClick={handleSave}
+                  disabled={!hasChanges || saving}
+                  size="sm"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      Save Selection
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Webhook Topics Selector (Intercom)
+// ---------------------------------------------------------------------------
+
+interface WebhookTopic {
+  topic: string;
+  selected: boolean;
+  isDefault: boolean;
+}
+
+interface WebhookTopicsResponse {
+  ok: boolean;
+  topics: WebhookTopic[];
+  selected: string[];
+  error?: string;
+}
+
+function WebhookTopicsSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [topics, setTopics] = useState<WebhookTopic[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [initialSelected, setInitialSelected] = useState<Set<string>>(
+    new Set(),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const loadTopics = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<WebhookTopicsResponse>(
+        `connections/${source}/webhook-topics`,
+      );
+      if (!data.ok) {
+        setError(data.error || "Failed to load webhook topics");
+        return;
+      }
+      setTopics(data.topics);
+      const sel = new Set(data.selected);
+      setSelected(sel);
+      setInitialSelected(new Set(sel));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load webhook topics",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && topics.length === 0 && !loading && !error) {
+      loadTopics();
+    }
+  }, [expanded, topics.length, loading, error, loadTopics]);
+
+  const hasChanges = useMemo(() => {
+    if (selected.size !== initialSelected.size) return true;
+    for (const key of selected) {
+      if (!initialSelected.has(key)) return true;
+    }
+    return false;
+  }, [selected, initialSelected]);
+
+  function toggleTopic(topic: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(topic)) next.delete(topic);
+      else next.add(topic);
+      return next;
+    });
+  }
+
+  function selectDefaults() {
+    setSelected(
+      new Set(topics.filter((t) => t.isDefault).map((t) => t.topic)),
+    );
+  }
+
+  function selectAll() {
+    setSelected(new Set(topics.map((t) => t.topic)));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.put(`connections/${source}/webhook-topics`, {
+        topics: [...selected],
+      });
+      setInitialSelected(new Set(selected));
+    } catch (err) {
+      console.error("Failed to save webhook topics:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Group topics by category (conversation, ticket, contact, user)
+  const grouped = useMemo(() => {
+    const groups: Record<string, WebhookTopic[]> = {};
+    for (const t of topics) {
+      const prefix = t.topic.split(".")[0];
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(t);
+    }
+    return Object.entries(groups);
+  }, [topics]);
+
+  return (
+    <Card>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between px-6 py-4 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Zap className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Webhook Topics</span>
+          <span className="text-xs text-muted-foreground">
+            {selected.size > 0
+              ? `${selected.size} topic${selected.size > 1 ? "s" : ""} active`
+              : "Select which events to process"}
+          </span>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+      {expanded && (
+        <CardContent className="space-y-4 pt-0">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading webhook topics...</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Select which Intercom webhook events OpenChief should process.
+                Unselected topics will be silently dropped. Polling (conversation
+                data every 30 minutes) runs independently and is not affected by
+                this selection.
+              </p>
+
+              {/* Quick actions */}
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={selectDefaults}>
+                  Defaults
+                </Button>
+                <Button variant="outline" size="sm" onClick={selectAll}>
+                  Select All
+                </Button>
+              </div>
+
+              <div className="max-h-72 space-y-3 overflow-y-auto">
+                {grouped.map(([prefix, groupTopics]) => (
+                  <div key={prefix}>
+                    <p className="mb-1 px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {prefix}
+                    </p>
+                    <div className="space-y-1">
+                      {groupTopics.map((t) => (
+                        <label
+                          key={t.topic}
+                          className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={selected.has(t.topic)}
+                            onCheckedChange={() => toggleTopic(t.topic)}
+                          />
+                          <span className="font-mono text-sm">{t.topic}</span>
+                          {t.isDefault && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              default
+                            </Badge>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <p className="text-xs text-muted-foreground">
+                  {selected.size === 0
+                    ? "No topics selected — all webhook events will be dropped"
+                    : `${selected.size} of ${topics.length} topics will be processed`}
+                </p>
+                <Button
+                  onClick={handleSave}
+                  disabled={!hasChanges || saving}
+                  size="sm"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      Save Topics
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Monitored Accounts (Twitter / X)
+// ---------------------------------------------------------------------------
+
+function MonitoredAccountsSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [accounts, setAccounts] = useState<TwitterAccount[]>([]);
+  const [newUsername, setNewUsername] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connectingAccount, setConnectingAccount] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const loadAccounts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<TwitterAccountsResponse>(
+        `connections/${source}/accounts`,
+      );
+      if (data.ok) {
+        setAccounts(data.accounts);
+      } else {
+        setError(data.error ?? "Failed to load accounts");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load accounts");
+    } finally {
+      setLoading(false);
+      setLoaded(true);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && !loaded && !loading) {
+      loadAccounts();
+    }
+  }, [expanded, loaded, loading, loadAccounts]);
+
+  const addAccount = () => {
+    const cleaned = newUsername.trim().replace(/^@/, "").toLowerCase();
+    if (!cleaned) return;
+    if (accounts.some((a) => a.username === cleaned)) return;
+    setAccounts((prev) => [
+      ...prev,
+      { username: cleaned, userId: null, oauthConnected: false, expiresAt: null },
+    ]);
+    setNewUsername("");
+    setDirty(true);
+  };
+
+  const removeAccount = (username: string) => {
+    setAccounts((prev) => prev.filter((a) => a.username !== username));
+    setDirty(true);
+  };
+
+  const saveAccounts = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.put(`connections/${source}/accounts`, {
+        accounts: accounts.map((a) => a.username),
+      });
+      setDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save accounts");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const connectOAuth = async (username: string) => {
+    setConnectingAccount(username);
+    try {
+      const data = await api.get<{ ok: boolean; authorizationUrl: string }>(
+        `connections/${source}/oauth/authorize?account=${encodeURIComponent(username)}`,
+      );
+      if (data.ok && data.authorizationUrl) {
+        window.open(data.authorizationUrl, "_blank");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start OAuth");
+    } finally {
+      setConnectingAccount(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <div className="flex items-center gap-2">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+          <Twitter className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <CardTitle className="text-base">Monitored Accounts</CardTitle>
+            <CardDescription>
+              {accounts.length > 0
+                ? `${accounts.length} account${accounts.length === 1 ? "" : "s"} monitored`
+                : "Add X accounts to monitor tweets and mentions"}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Loading accounts...
+              </span>
+            </div>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : (
+            <>
+              {/* Add account input */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    @
+                  </span>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addAccount();
+                    }}
+                    placeholder="username"
+                    className="h-9 w-full rounded-md border bg-background pl-7 pr-3 text-sm"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={addAccount}
+                  disabled={!newUsername.trim()}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+
+              {/* Account list */}
+              {accounts.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No accounts configured. Add your own and competitor accounts
+                  above.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {accounts.map((account) => (
+                    <div
+                      key={account.username}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`https://x.com/${account.username}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium hover:underline flex items-center gap-1"
+                        >
+                          @{account.username}
+                          <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                        </a>
+                        {account.oauthConnected ? (
+                          <Badge className="bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 text-[10px] px-1.5 py-0">
+                            OAuth Connected
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            No OAuth
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!account.oauthConnected && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={connectingAccount === account.username}
+                            onClick={() => connectOAuth(account.username)}
+                          >
+                            {connectingAccount === account.username ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Connect OAuth"
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => removeAccount(account.username)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Help text */}
+              <p className="text-xs text-muted-foreground">
+                Own accounts can connect OAuth for mentions tracking. Competitor
+                accounts will track public tweets and engagement only. Polls run
+                every 2 hours.
+              </p>
+
+              {/* Save button */}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={saveAccounts}
+                  disabled={!dirty || saving}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      Save Accounts
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search Queries (Twitter / X)
+// ---------------------------------------------------------------------------
+
+function SearchQueriesSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [queries, setQueries] = useState<string[]>([]);
+  const [newQuery, setNewQuery] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const loadQueries = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<TwitterSearchQueriesResponse>(
+        `connections/${source}/search-queries`,
+      );
+      if (data.ok) {
+        setQueries(data.queries);
+      } else {
+        setError(data.error ?? "Failed to load search queries");
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load search queries",
+      );
+    } finally {
+      setLoading(false);
+      setLoaded(true);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && !loaded && !loading) {
+      loadQueries();
+    }
+  }, [expanded, loaded, loading, loadQueries]);
+
+  const addQuery = () => {
+    const cleaned = newQuery.trim();
+    if (!cleaned) return;
+    if (queries.includes(cleaned)) return;
+    setQueries((prev) => [...prev, cleaned]);
+    setNewQuery("");
+    setDirty(true);
+  };
+
+  const removeQuery = (query: string) => {
+    setQueries((prev) => prev.filter((q) => q !== query));
+    setDirty(true);
+  };
+
+  const saveQueries = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.put(`connections/${source}/search-queries`, { queries });
+      setDirty(false);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save search queries",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <div className="flex items-center gap-2">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <CardTitle className="text-base">Search Queries</CardTitle>
+            <CardDescription>
+              {queries.length > 0
+                ? `${queries.length} search quer${queries.length === 1 ? "y" : "ies"} active`
+                : "Add search queries to monitor keywords, hashtags, and competitors"}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Loading queries...
+              </span>
+            </div>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : (
+            <>
+              {/* Add query input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newQuery}
+                  onChange={(e) => setNewQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addQuery();
+                  }}
+                  placeholder='#hashtag, "exact phrase", from:username'
+                  className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
+                />
+                <Button
+                  size="sm"
+                  onClick={addQuery}
+                  disabled={!newQuery.trim()}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+
+              {/* Query list */}
+              {queries.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No search queries configured. Add queries to monitor
+                  keywords, hashtags, and competitor mentions.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {queries.map((query) => (
+                    <div
+                      key={query}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <code className="text-sm bg-muted px-1.5 py-0.5 rounded">
+                        {query}
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => removeQuery(query)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Help text */}
+              <p className="text-xs text-muted-foreground">
+                Use X search syntax:{" "}
+                <code className="bg-muted px-1 rounded">#hashtag</code>,{" "}
+                <code className="bg-muted px-1 rounded">
+                  &quot;exact phrase&quot;
+                </code>
+                ,{" "}
+                <code className="bg-muted px-1 rounded">from:username</code>,{" "}
+                <code className="bg-muted px-1 rounded">to:username</code>,{" "}
+                <code className="bg-muted px-1 rounded">-excludeword</code>.
+                Queries run every 2 hours.
+              </p>
+
+              {/* Save button */}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={saveQueries}
+                  disabled={!dirty || saving}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      Save Queries
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ConnectionDetail
 // ---------------------------------------------------------------------------
 
@@ -1030,6 +2083,26 @@ export function ConnectionDetail() {
       {/* File Picker (Figma only) */}
       {source === "figma" && adminSecretConfigured && (
         <FilePickerSection source={source} />
+      )}
+
+      {/* Channel Picker (Discord only) */}
+      {source === "discord" && adminSecretConfigured && (
+        <ChannelPickerSection source={source} />
+      )}
+
+      {/* Webhook Topics (Intercom only) */}
+      {source === "intercom" && adminSecretConfigured && (
+        <WebhookTopicsSection source={source} />
+      )}
+
+      {/* Monitored Accounts (Twitter only) */}
+      {source === "twitter" && adminSecretConfigured && (
+        <MonitoredAccountsSection source={source} />
+      )}
+
+      {/* Search Queries (Twitter only) */}
+      {source === "twitter" && adminSecretConfigured && (
+        <SearchQueriesSection source={source} />
       )}
 
       {/* Recent Events */}
