@@ -28,6 +28,7 @@ import {
   Loader2,
   Save,
   MessageSquare,
+  Clock,
 } from "lucide-react";
 import {
   BarChart,
@@ -524,6 +525,15 @@ export function AgentDetail() {
           })}
         </div>
       </section>
+
+      {/* Report Schedule Time Picker */}
+      <ReportSchedule
+        agentId={agent.id}
+        scheduleTime={agent.scheduleTime}
+        onSave={async (time) => {
+          await saveAgent({ ...agent, scheduleTime: time });
+        }}
+      />
 
       {/* Slack Report Channel Picker */}
       <SlackReportChannel
@@ -1897,6 +1907,80 @@ function EditableSubscriptions({
         </div>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ReportSchedule — per-agent time picker for daily report schedule  */
+/* ------------------------------------------------------------------ */
+
+const DEFAULT_REPORT_SCHEDULE: Record<string, string> = {
+  "eng-manager":        "08:00",
+  "product-manager":    "08:04",
+  "design-manager":     "08:08",
+  "data-analyst":       "08:12",
+  "customer-support":   "08:16",
+  "community-manager":  "08:20",
+  "marketing-manager":  "08:24",
+  "cro":                "08:28",
+  "bizdev":             "08:32",
+  "head-of-hr":         "08:36",
+  "ciso":               "08:40",
+  "cfo":                "08:44",
+  "legal-counsel":      "08:48",
+  "researcher":         "08:52",
+  "ceo":                "09:30",
+};
+
+function ReportSchedule({
+  agentId,
+  scheduleTime,
+  onSave,
+}: {
+  agentId: string;
+  scheduleTime: string | undefined;
+  onSave: (time: string) => Promise<void>;
+}) {
+  const effectiveTime = scheduleTime || DEFAULT_REPORT_SCHEDULE[agentId] || "08:00";
+  const [saving, setSaving] = useState(false);
+
+  async function handleChange(value: string) {
+    setSaving(true);
+    try {
+      await onSave(value);
+      toast.success(`Report schedule updated to ${value}`);
+    } catch {
+      toast.error("Failed to update report schedule");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="relative">
+      <div className="rounded-lg border border-border p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Report Schedule
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">Daily at</span>
+          <input
+            type="time"
+            value={effectiveTime}
+            onChange={(e) => handleChange(e.target.value)}
+            disabled={saving}
+            className="rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <span className="text-sm text-muted-foreground">CT</span>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Weekdays only (Mon–Fri)
+        </p>
+      </div>
+    </section>
   );
 }
 

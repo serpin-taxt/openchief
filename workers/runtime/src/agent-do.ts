@@ -57,7 +57,13 @@ function defaultReportTime(agentId: string): { hour: number; minute: number } {
   return { hour: 8, minute: 53 + ((hash >>> 0) % 7) };
 }
 
-function getAgentReportTime(agentId: string): { hour: number; minute: number } {
+function getAgentReportTime(agentId: string, config?: AgentDefinition): { hour: number; minute: number } {
+  // 1. Use agent's configured schedule if set
+  if (config?.scheduleTime) {
+    const [h, m] = config.scheduleTime.split(":").map(Number);
+    if (!isNaN(h) && !isNaN(m)) return { hour: h, minute: m };
+  }
+  // 2. Fall back to hardcoded map
   return REPORT_SCHEDULE[agentId] ?? defaultReportTime(agentId);
 }
 
@@ -205,7 +211,7 @@ export class AgentDurableObject extends DurableObject<Env> {
         );
         if (hasDaily) {
           const tz = this.env.REPORT_TIMEZONE || "America/Chicago";
-          const { hour, minute } = getAgentReportTime(agentId);
+          const { hour, minute } = getAgentReportTime(agentId, config);
           const alarmTime = nextWeekdayAlarm(hour, minute, tz);
           await this.ctx.storage.put("pending_alarm_type", "daily");
           await this.ctx.storage.setAlarm(alarmTime.getTime());
@@ -1700,7 +1706,7 @@ export class AgentDurableObject extends DurableObject<Env> {
     );
 
     if (hasDaily) {
-      const { hour, minute } = getAgentReportTime(config.id);
+      const { hour, minute } = getAgentReportTime(config.id, config);
       nextReport = nextWeekdayAlarm(hour, minute, tz, true);
     }
 

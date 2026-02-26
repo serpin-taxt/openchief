@@ -42,6 +42,9 @@ export interface AgentDefinition {
 
   /** Slack channel ID to post daily reports to (e.g. "C1234567890") */
   slackChannelId?: string;
+
+  /** Report schedule time in local timezone, HH:MM format (e.g. "08:00", "09:30"). Uses REPORT_TIMEZONE. */
+  scheduleTime?: string;
 }
 
 export interface EventSubscription {

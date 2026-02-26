@@ -2817,28 +2817,62 @@ async function handleJobsStatus(request: Request, env: Env): Promise<Response> {
     }
   }
 
-  // Compute next scheduled run time for pending jobs
-  const reportHour = parseInt(env.REPORT_TIME_UTC_HOUR || "14", 10);
+  // Compute next scheduled run time for pending jobs (timezone-aware, per-agent)
+  const tz = env.REPORT_TIMEZONE || "America/Chicago";
   const now = new Date();
 
-  function computeNextRunAt(cadence: string): string | null {
-    // Daily reports run Mon-Fri at reportHour:00 UTC
+  // Hardcoded fallback schedule (same as runtime's REPORT_SCHEDULE)
+  const REPORT_SCHEDULE: Record<string, { hour: number; minute: number }> = {
+    "eng-manager":        { hour: 8, minute: 0 },
+    "product-manager":    { hour: 8, minute: 4 },
+    "design-manager":     { hour: 8, minute: 8 },
+    "data-analyst":       { hour: 8, minute: 12 },
+    "customer-support":   { hour: 8, minute: 16 },
+    "community-manager":  { hour: 8, minute: 20 },
+    "marketing-manager":  { hour: 8, minute: 24 },
+    "cro":                { hour: 8, minute: 28 },
+    "bizdev":             { hour: 8, minute: 32 },
+    "head-of-hr":         { hour: 8, minute: 36 },
+    "ciso":               { hour: 8, minute: 40 },
+    "cfo":                { hour: 8, minute: 44 },
+    "legal-counsel":      { hour: 8, minute: 48 },
+    "researcher":         { hour: 8, minute: 52 },
+    "ceo":                { hour: 9, minute: 30 },
+  };
+
+  function tzOffsetMs(date: Date, timezone: string): number {
+    const utcStr = date.toLocaleString("en-US", { timeZone: "UTC" });
+    const localStr = date.toLocaleString("en-US", { timeZone: timezone });
+    return new Date(localStr).getTime() - new Date(utcStr).getTime();
+  }
+
+  function computeNextRunAt(config: AgentDefinition): string | null {
+    const cadence = config.outputs.reports[0]?.cadence;
     if (cadence !== "daily") return null;
 
-    const target = new Date(now);
-    target.setUTCHours(reportHour, 0, 0, 0);
+    // Determine agent's schedule (config → hardcoded → hash fallback)
+    let hour = 8, minute = 0;
+    if (config.scheduleTime) {
+      const [h, m] = config.scheduleTime.split(":").map(Number);
+      if (!isNaN(h) && !isNaN(m)) { hour = h; minute = m; }
+    } else if (REPORT_SCHEDULE[config.id]) {
+      hour = REPORT_SCHEDULE[config.id].hour;
+      minute = REPORT_SCHEDULE[config.id].minute;
+    }
 
-    // If today's run time hasn't passed yet and it's a weekday, use today
-    const dow = target.getUTCDay(); // 0=Sun, 6=Sat
-    if (target > now && dow >= 1 && dow <= 5) {
-      return target.toISOString();
+    // Find next weekday at hour:minute in local timezone (same logic as runtime)
+    for (let d = 0; d <= 7; d++) {
+      const base = new Date(now);
+      base.setUTCDate(base.getUTCDate() + d);
+      base.setUTCHours(hour, minute, 0, 0);
+      const offset = tzOffsetMs(base, tz);
+      const utc = new Date(base.getTime() - offset);
+      if (utc.getTime() <= now.getTime()) continue;
+      const localDay = new Date(utc.getTime() + offset).getUTCDay();
+      if (localDay === 0 || localDay === 6) continue;
+      return utc.toISOString();
     }
-    // Otherwise find next weekday
-    target.setUTCDate(target.getUTCDate() + 1);
-    while (target.getUTCDay() === 0 || target.getUTCDay() === 6) {
-      target.setUTCDate(target.getUTCDate() + 1);
-    }
-    return target.toISOString();
+    return null;
   }
 
   const jobs = (agentRows || []).map((row) => {
@@ -2855,7 +2889,7 @@ async function handleJobsStatus(request: Request, env: Env): Promise<Response> {
         headline: generated?.headline || null,
         completedAt: generated?.createdAt || null,
         eventCount: generated?.eventCount || null,
-        nextRunAt: computeNextRunAt(r.cadence),
+        nextRunAt: computeNextRunAt(config),
       };
     });
 
