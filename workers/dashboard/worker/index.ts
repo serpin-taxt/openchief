@@ -213,9 +213,25 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         name: "GA4_SERVICE_ACCOUNT_KEY",
         label: "Service Account Key (JSON)",
         secret: true,
+        description:
+          "The full JSON contents of your Google Cloud service account key file. Created via GCP Console → APIs & Services → Credentials → Service Account → Keys → Add Key → JSON.",
       },
-      { name: "GA4_PROPERTY_ID", label: "GA4 Property ID", secret: false },
-      { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
+      {
+        name: "GA4_PROPERTY_ID",
+        label: "GA4 Property ID",
+        secret: false,
+        placeholder: "123456789",
+        description:
+          "The numeric Property ID from GA4 Admin → Property Settings (9 digits). Not the Measurement ID (G-XXXX).",
+      },
+      {
+        name: "ADMIN_SECRET",
+        label: "Admin Secret",
+        secret: true,
+        placeholder: "openssl rand -hex 32",
+        description:
+          "A random secret you generate for authenticating admin endpoints (poll, backfill).",
+      },
     ],
   },
   googlecalendar: {
@@ -2839,7 +2855,7 @@ async function handleJobsStatus(request: Request, env: Env): Promise<Response> {
         headline: generated?.headline || null,
         completedAt: generated?.createdAt || null,
         eventCount: generated?.eventCount || null,
-        nextRunAt: generated ? null : computeNextRunAt(r.cadence),
+        nextRunAt: computeNextRunAt(r.cadence),
       };
     });
 

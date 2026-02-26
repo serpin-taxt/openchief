@@ -557,6 +557,78 @@ const SETUP_GUIDES: Record<string, SetupGuideData> = {
     claudeCode:
       'You can automate the X Developer App setup using Claude Code with browser automation. Use this prompt:\n\n"Set up an X/Twitter app for OpenChief. Navigate to developer.x.com → Developer Portal → Projects & Apps → Create a new app. Name it \'OpenChief\', select Read access. Go to Keys and tokens tab and generate a Bearer Token. Then go to User authentication settings → Set up → App permissions: Read, Type: Confidential client, Callback URL: https://MY_TWITTER_CONNECTOR_URL/oauth/callback, Website URL: https://github.com/openchief/openchief. Copy the Client ID and Client Secret. Then enter all credentials (Bearer Token, OAuth Client ID, OAuth Client Secret, and a generated Admin Secret via openssl rand -hex 32) in the OpenChief dashboard at MY_DASHBOARD_URL/connections/twitter."',
   },
+  googleanalytics: {
+    manual: [
+      {
+        step: "Create a Google Cloud project (or use existing)",
+        detail:
+          "Go to console.cloud.google.com. Select an existing project or create a new one. This project will hold the service account that reads your GA4 data.",
+      },
+      {
+        step: "Enable the Google Analytics Data API",
+        detail:
+          'In the Google Cloud Console, go to APIs & Services → Library. Search for "Google Analytics Data API" and click Enable. This is the v1 Data API (not the older Reporting API or Admin API).',
+      },
+      {
+        step: "Create a service account",
+        detail:
+          'Go to APIs & Services → Credentials → Create Credentials → Service Account. Name it something like "openchief-ga4-reader". No special roles needed at the GCP level — access is granted in GA4 itself.',
+      },
+      {
+        step: "Download the service account key",
+        detail:
+          "Click on the new service account → Keys tab → Add Key → Create new key → JSON. A JSON file will download — this is your service account key. Keep it safe; you'll paste its contents below.",
+      },
+      {
+        step: "Grant the service account access in GA4",
+        detail:
+          'Go to analytics.google.com → Admin → your GA4 property → Property Access Management. Click the + button → Add users. Enter the service account email (it looks like name@project.iam.gserviceaccount.com). Set the role to "Viewer" — read-only access is all the connector needs.',
+      },
+      {
+        step: "Find your GA4 Property ID",
+        detail:
+          "In GA4, go to Admin → Property Settings. The Property ID is a 9-digit number shown near the top of the page (e.g. 123456789). This is NOT the Measurement ID (G-XXXX) — it's the numeric property identifier.",
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Paste the full JSON contents of the downloaded service account key file into the Service Account Key field. Enter the numeric GA4 Property ID. Generate an Admin Secret (openssl rand -hex 32) for the connector's admin endpoints. The connector polls GA4 every 6 hours for page views, traffic sources, referrers, geography, and site overview — no webhooks needed.",
+      },
+    ],
+    claudeCode:
+      'Google Analytics setup requires manual steps in two consoles (Google Cloud + GA4). Use this prompt:\n\n"Set up Google Analytics for OpenChief. Navigate to console.cloud.google.com, select (or create) a project, go to APIs & Services → Library and enable the \'Google Analytics Data API\'. Then go to APIs & Services → Credentials → Create Credentials → Service Account, name it \'openchief-ga4-reader\'. Click the service account → Keys → Add Key → Create new key → JSON, and save the downloaded file. Copy the service account email address. Then go to analytics.google.com → Admin → Property Access Management, add the service account email as a Viewer. Note the numeric Property ID from Admin → Property Settings. Finally, in the OpenChief dashboard at MY_DASHBOARD_URL/connections/googleanalytics, paste the JSON key file contents, enter the Property ID, and set an Admin Secret (openssl rand -hex 32). Click Save."',
+  },
+  notion: {
+    manual: [
+      {
+        step: "Create a Notion integration",
+        detail:
+          'Go to notion.so/profile/integrations and click "Create a new integration". Name it (e.g. "OpenChief"), select Type: Internal, and choose the workspace you want to monitor. Click Create.',
+      },
+      {
+        step: "Configure capabilities",
+        detail:
+          "On the integration settings page, under Capabilities, ensure these are checked: Read content, Read comments, and Read user information including email addresses. The connector only reads data — write permissions are optional. Click Save.",
+      },
+      {
+        step: "Copy the integration token",
+        detail:
+          'On the Configuration tab, find "Internal integration secret" and click Show. Copy the token (starts with ntn_...). This is your Integration Token for the field below.',
+      },
+      {
+        step: "Grant access to pages and databases",
+        detail:
+          'Go to the Content access tab and click "Edit access". Select the teamspaces, pages, or databases you want OpenChief to monitor. Granting access to a parent page includes all its children. Click Save.',
+      },
+      {
+        step: "Enter credentials below",
+        detail:
+          "Paste the integration token into the Integration Token field. Generate an Admin Secret (openssl rand -hex 32) for the connector's admin endpoints. The connector polls Notion every 15 minutes for page updates, database entry changes, and new comments.",
+      },
+    ],
+    claudeCode:
+      'Notion setup is straightforward. Use this prompt:\n\n"Set up Notion for OpenChief. Navigate to notion.so/profile/integrations, create a new Internal integration named \'OpenChief\' for your workspace. Under Capabilities, enable Read content, Read comments, and Read user information including email addresses. Save, then copy the Internal integration secret (starts with ntn_...). Go to the Content access tab, click Edit access, and select the teamspaces or pages to monitor. In the OpenChief dashboard at MY_DASHBOARD_URL/connections/notion, paste the integration token and set an Admin Secret (openssl rand -hex 32). Click Save."',
+  },
 };
 
 // ---------------------------------------------------------------------------

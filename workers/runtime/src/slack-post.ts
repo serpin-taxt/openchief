@@ -120,3 +120,92 @@ export function formatMeetingForSlack(
       : null,
   };
 }
+
+/**
+ * Format a daily agent report as an array of Slack messages.
+ * Each message becomes a separate post in a thread:
+ *   1. Headline with health signal (parent message)
+ *   2–N. One message per report section
+ *   Last. Action items summary
+ */
+export function formatReportForSlack(
+  agentName: string,
+  content: ReportContent,
+  reportId: string
+): string[] {
+  const messages: string[] = [];
+
+  // Parent message: health + agent name + headline
+  const healthEmoji =
+    content.healthSignal === "green"
+      ? ":large_green_circle:"
+      : content.healthSignal === "yellow"
+        ? ":large_yellow_circle:"
+        : ":red_circle:";
+  messages.push(
+    `${healthEmoji} *${agentName} — Daily Report*\n> ${content.headline}\n\n_${content.sections.length} sections below in thread_`
+  );
+
+  // One message per section
+  for (const section of content.sections) {
+    const severityPrefix =
+      section.severity === "critical"
+        ? ":red_circle: "
+        : section.severity === "warning"
+          ? ":warning: "
+          : "";
+    // Title-case the section name for readability
+    const title = section.name
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+    messages.push(`${severityPrefix}*${title}*\n${section.body}`);
+  }
+
+  // Final message: action items
+  if (content.actionItems.length > 0) {
+    const lines = ["*Action Items*"];
+    for (const item of content.actionItems) {
+      const emoji =
+        item.priority === "critical"
+          ? ":rotating_light:"
+          : item.priority === "high"
+            ? ":exclamation:"
+            : item.priority === "medium"
+              ? ":small_blue_diamond:"
+              : ":small_orange_diamond:";
+      const assignee = item.assignee ? ` _(${item.assignee})_` : "";
+      lines.push(`${emoji} ${item.description}${assignee}`);
+    }
+    messages.push(lines.join("\n"));
+  }
+
+  return messages;
+}
+
+/**
+ * Post a full agent report to a Slack channel as a threaded conversation.
+ * The first message is the headline (parent); sections + action items follow as replies.
+ */
+export async function postReportToSlack(
+  token: string,
+  channelId: string,
+  agentName: string,
+  content: ReportContent,
+  reportId: string
+): Promise<void> {
+  const messages = formatReportForSlack(agentName, content, reportId);
+  if (messages.length === 0) return;
+
+  // Post headline as parent message
+  const first = await postToSlack(token, channelId, messages[0]);
+  if (!first.ok || !first.ts) {
+    console.error(`Failed to post report headline to Slack: ${first.error}`);
+    return;
+  }
+
+  // Post remaining messages as thread replies
+  for (const msg of messages.slice(1)) {
+    await postToSlack(token, channelId, msg, first.ts);
+  }
+}

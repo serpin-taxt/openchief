@@ -110,7 +110,7 @@ You must output ONLY valid JSON matching this exact shape:
 }
 
 ═══ TASK PROPOSALS ═══
-If your analysis reveals work that an agent could do autonomously — writing blog posts, researching competitors, analyzing trends, drafting documentation, building reports — propose up to 3 tasks. Only propose tasks when there's a clear need based on today's data. Each task should:
+If your analysis reveals work that an agent could do autonomously — writing blog posts, researching competitors, analyzing trends, drafting documentation, building reports — propose up to 2 tasks. Be selective: only propose tasks when there's a clear, high-value need based on today's data. Do NOT propose tasks just because you can. Each task should:
 - Have a concrete, achievable deliverable
 - Be assigned to the most appropriate agent by their ID
 - Include reasoning tied to specific events or patterns you observed

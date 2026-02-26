@@ -39,6 +39,9 @@ export interface AgentDefinition {
    * Other agents can also reference this for strategic alignment.
    */
   strategy?: AgentStrategy;
+
+  /** Slack channel ID to post daily reports to (e.g. "C1234567890") */
+  slackChannelId?: string;
 }
 
 export interface EventSubscription {

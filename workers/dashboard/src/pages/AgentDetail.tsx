@@ -27,6 +27,7 @@ import {
   Hash,
   Loader2,
   Save,
+  MessageSquare,
 } from "lucide-react";
 import {
   BarChart,
@@ -78,6 +79,7 @@ import {
 } from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { HealthBadge } from "@/components/HealthBadge";
 import { SourceIcon } from "@/components/SourceIcon";
@@ -522,6 +524,14 @@ export function AgentDetail() {
           })}
         </div>
       </section>
+
+      {/* Slack Report Channel Picker */}
+      <SlackReportChannel
+        selectedChannelId={agent.slackChannelId}
+        onSave={async (channelId) => {
+          await saveAgent({ ...agent, slackChannelId: channelId });
+        }}
+      />
 
       {/* Strategy Cards — only for agents with strategy config (CEO) */}
       {agent.strategy && (
@@ -1891,7 +1901,7 @@ function EditableSubscriptions({
 }
 
 /* ------------------------------------------------------------------ */
-/*  SlackChannelPicker — searchable multi-select for channel filters  */
+/*  Shared Slack channel hook                                         */
 /* ------------------------------------------------------------------ */
 
 interface SlackChannel {
@@ -1899,6 +1909,137 @@ interface SlackChannel {
   name: string;
   is_private?: boolean;
 }
+
+function useSlackChannels() {
+  const [loading, setLoading] = useState(false);
+  const [channels, setChannels] = useState<SlackChannel[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.get<{
+          ok: boolean;
+          channels: SlackChannel[];
+          error?: string;
+        }>("connections/slack/channels");
+        if (cancelled) return;
+        if (!data.ok) {
+          setError(data.error || "Failed to load channels");
+          return;
+        }
+        setChannels(data.channels);
+      } catch (err) {
+        if (!cancelled)
+          setError(
+            err instanceof Error ? err.message : "Failed to load channels",
+          );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { loading, channels, error };
+}
+
+/* ------------------------------------------------------------------ */
+/*  SlackReportChannel — single-select dropdown for report posting    */
+/* ------------------------------------------------------------------ */
+
+function SlackReportChannel({
+  selectedChannelId,
+  onSave,
+}: {
+  selectedChannelId: string | undefined;
+  onSave: (channelId: string | undefined) => Promise<void>;
+}) {
+  const { loading, channels, error } = useSlackChannels();
+  const [saving, setSaving] = useState(false);
+
+  async function handleChange(channelId: string) {
+    setSaving(true);
+    try {
+      await onSave(channelId || undefined);
+      toast.success(
+        channelId ? "Slack report channel saved" : "Slack report channel cleared",
+      );
+    } catch {
+      toast.error("Failed to save Slack report channel");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Don't render if Slack isn't configured
+  if (error) return null;
+
+  const publicChannels = channels.filter((ch) => !ch.is_private);
+  const privateChannels = channels.filter((ch) => ch.is_private);
+  const selectedName = channels.find((ch) => ch.id === selectedChannelId)?.name;
+
+  return (
+    <section className="relative">
+      <div className="rounded-lg border border-border p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Slack Report Channel
+          </span>
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Loading channels...</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Select
+              value={selectedChannelId || ""}
+              onChange={(e) => handleChange(e.target.value)}
+              disabled={saving}
+            >
+              <option value="">None — reports stay in dashboard only</option>
+              {publicChannels.length > 0 && (
+                <optgroup label="Public Channels">
+                  {publicChannels.map((ch) => (
+                    <option key={ch.id} value={ch.id}>
+                      #{ch.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {privateChannels.length > 0 && (
+                <optgroup label="Private Channels">
+                  {privateChannels.map((ch) => (
+                    <option key={ch.id} value={ch.id}>
+                      🔒 {ch.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {selectedName
+                ? `Reports will be posted to #${selectedName} as a threaded message`
+                : "Select a channel to auto-post daily reports to Slack"}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  SlackChannelPicker — searchable multi-select for channel filters  */
+/* ------------------------------------------------------------------ */
 
 function getSlackChannels(agent: AgentDefinition): string[] {
   for (const sub of agent.subscriptions) {
@@ -1918,42 +2059,13 @@ function SlackChannelPicker({
   selectedChannels: string[];
   onSave: (channels: string[]) => Promise<void>;
 }) {
-  const [loading, setLoading] = useState(false);
-  const [channels, setChannels] = useState<SlackChannel[]>([]);
+  const { loading, channels, error } = useSlackChannels();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [initialSelected, setInitialSelected] = useState<Set<string>>(
     new Set(),
   );
-  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState(false);
-
-  const loadChannels = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.get<{
-        ok: boolean;
-        channels: SlackChannel[];
-        error?: string;
-      }>("connections/slack/channels");
-      if (!data.ok) {
-        setError(data.error || "Failed to load channels");
-        return;
-      }
-      setChannels(data.channels);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load channels",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadChannels();
-  }, [loadChannels]);
 
   // Initialize selected from props (strip # prefix to match API data)
   useEffect(() => {

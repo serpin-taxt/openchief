@@ -36,6 +36,18 @@ export interface RetentionSnapshot {
   cohortSize: number;
 }
 
+// --- Helpers -----------------------------------------------------------------
+
+/**
+ * Event timestamp uses the current poll time (when data was fetched) rather
+ * than midnight UTC of the data date.  This keeps Amplitude events inside
+ * the runtime's 25-hour lookback window.  The original data date is preserved
+ * in `payload.date` for display purposes.
+ */
+function pollTimestamp(): string {
+  return new Date().toISOString();
+}
+
 // --- Normalizers -------------------------------------------------------------
 
 /**
@@ -71,7 +83,7 @@ export function normalizeMetric(
 
   return {
     id: generateULID(),
-    timestamp: new Date(snapshot.date + "T00:00:00Z").toISOString(),
+    timestamp: pollTimestamp(),
     ingestedAt: new Date().toISOString(),
     source: "amplitude",
     eventType: "metric.snapshot",
@@ -112,7 +124,7 @@ export function normalizeComposition(
 
   return {
     id: generateULID(),
-    timestamp: new Date(snapshot.date + "T00:00:00Z").toISOString(),
+    timestamp: pollTimestamp(),
     ingestedAt: new Date().toISOString(),
     source: "amplitude",
     eventType: "metric.composition",
@@ -156,7 +168,7 @@ export function normalizeRetention(
 
   return {
     id: generateULID(),
-    timestamp: new Date(snapshot.date + "T00:00:00Z").toISOString(),
+    timestamp: pollTimestamp(),
     ingestedAt: new Date().toISOString(),
     source: "amplitude",
     eventType: "metric.retention",

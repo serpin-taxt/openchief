@@ -199,8 +199,8 @@ export function Jobs() {
               <TableRow>
                 <TableHead>Agent</TableHead>
                 <TableHead>Report Type</TableHead>
-                <TableHead>Cadence</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Next Run</TableHead>
                 <TableHead>Health</TableHead>
                 <TableHead>Last Run</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -227,28 +227,29 @@ export function Jobs() {
                           {report.reportType}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground capitalize">
-                        {report.cadence}
-                      </TableCell>
                       <TableCell>
                         {report.completed ? (
                           <span className="inline-flex items-center gap-1 text-sm text-emerald-700">
                             <CheckCircle2 className="h-3.5 w-3.5" />
                             Completed
                           </span>
-                        ) : report.nextRunAt ? (
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-sm text-amber-600">
+                            <Clock className="h-3.5 w-3.5" />
+                            Scheduled
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {report.nextRunAt ? (
                           <span
-                            className="inline-flex items-center gap-1 text-sm text-muted-foreground cursor-default"
+                            className="cursor-default"
                             title={formatExactTime(report.nextRunAt)}
                           >
-                            <Clock className="h-3.5 w-3.5" />
-                            {relativeTime(report.nextRunAt)}
+                            {formatExactTime(report.nextRunAt)}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                            <Clock className="h-3.5 w-3.5" />
-                            Pending
-                          </span>
+                          "--"
                         )}
                       </TableCell>
                       <TableCell>

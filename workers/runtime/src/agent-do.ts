@@ -17,6 +17,7 @@ import { buildTaskExecutionPrompt } from "./task-prompt";
 import { getAgentTools, executeTool } from "./agent-tools";
 import type { ToolDefinition } from "./agent-tools";
 import { retrieveContext, indexReport } from "./rag";
+import { postReportToSlack } from "./slack-post";
 
 // ---------------------------------------------------------------------------
 // Staggered report schedule
@@ -1094,6 +1095,25 @@ export class AgentDurableObject extends DurableObject<Env> {
       { expirationTtl: 86400 }
     );
 
+    // Post report to Slack if configured (non-blocking)
+    if (config.slackChannelId) {
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            const slackToken = await this.env.KV.get("connector-secret:slack:SLACK_BOT_TOKEN");
+            if (!slackToken) {
+              console.log("Slack report posting skipped — no bot token in KV");
+              return;
+            }
+            await postReportToSlack(slackToken, config.slackChannelId!, config.name, content, reportId);
+            console.log(`Posted ${config.name} report to Slack channel ${config.slackChannelId}`);
+          } catch (err) {
+            console.error(`Failed to post ${config.name} report to Slack:`, err);
+          }
+        })()
+      );
+    }
+
     // Extract and insert task proposals (non-CEO reports only)
     if (!isCeoMeeting) {
       try {
@@ -1104,7 +1124,23 @@ export class AgentDurableObject extends DurableObject<Env> {
           critical: 80,
         };
         const proposals = parseTaskProposals(response.text);
-        for (const proposal of proposals) {
+
+        // Enforce daily cap of 5 proposals per agent
+        const DAILY_TASK_LIMIT = 5;
+        const today = now.split("T")[0]; // "YYYY-MM-DD"
+        const countResult = await this.env.DB.prepare(
+          `SELECT COUNT(*) as count FROM tasks
+           WHERE created_by = ? AND created_at >= ? AND created_at < ?`
+        )
+          .bind(config.id, `${today}T00:00:00.000Z`, `${today}T23:59:59.999Z`)
+          .first<{ count: number }>();
+        const todayCount = countResult?.count ?? 0;
+        const remaining = Math.max(0, DAILY_TASK_LIMIT - todayCount);
+        if (remaining === 0) {
+          console.log(`Daily task limit (${DAILY_TASK_LIMIT}) reached for ${config.id}, skipping proposals`);
+        }
+
+        for (const proposal of proposals.slice(0, remaining)) {
           // Check for duplicate: same title + assignee already pending
           const existing = await this.env.DB.prepare(
             `SELECT id FROM tasks
@@ -1146,14 +1182,34 @@ export class AgentDurableObject extends DurableObject<Env> {
     if (isCeoMeeting) {
       try {
         const decisions = parseTaskDecisions(response.text);
+
+        // Enforce daily cap of 6 queued tasks
+        const DAILY_QUEUE_LIMIT = 6;
+        const today = now.split("T")[0];
+        const queuedToday = await this.env.DB.prepare(
+          `SELECT COUNT(*) as count FROM tasks
+           WHERE status IN ('queued', 'in_progress', 'completed')
+             AND updated_at >= ? AND updated_at < ?`
+        )
+          .bind(`${today}T00:00:00.000Z`, `${today}T23:59:59.999Z`)
+          .first<{ count: number }>();
+        let queuedCount = queuedToday?.count ?? 0;
+
         for (const decision of decisions) {
           if (decision.action === "queue") {
+            if (queuedCount >= DAILY_QUEUE_LIMIT) {
+              console.log(
+                `Daily queue limit (${DAILY_QUEUE_LIMIT}) reached — skipping task ${decision.taskId}`
+              );
+              continue;
+            }
             await this.env.DB.prepare(
               `UPDATE tasks SET status = 'queued', priority = ?, updated_at = ?
                WHERE id = ? AND status = 'proposed'`
             )
               .bind(decision.priority, now, decision.taskId)
               .run();
+            queuedCount++;
             console.log(
               `CEO queued task ${decision.taskId} with priority ${decision.priority}${decision.notes ? `: ${decision.notes}` : ""}`
             );
