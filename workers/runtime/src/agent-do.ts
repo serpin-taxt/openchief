@@ -832,13 +832,18 @@ export class AgentDurableObject extends DurableObject<Env> {
           params.push(sub.scopeFilter.org);
         }
         if (sub.scopeFilter.project) {
-          const projects = Array.isArray(sub.scopeFilter.project)
-            ? sub.scopeFilter.project
-            : [sub.scopeFilter.project];
-          parts.push(
-            `scope_project IN (${projects.map(() => "?").join(", ")})`
-          );
-          params.push(...projects);
+          const raw = sub.scopeFilter.project;
+          const projects: string[] = Array.isArray(raw)
+            ? raw.map(String)
+            : typeof raw === "string"
+              ? raw.split(",").map((s) => s.trim())
+              : [String(raw)];
+          if (projects.length > 0) {
+            parts.push(
+              `scope_project IN (${projects.map(() => "?").join(", ")})`
+            );
+            params.push(...projects);
+          }
         }
         if (sub.scopeFilter.team) {
           parts.push(`scope_team = ?`);
