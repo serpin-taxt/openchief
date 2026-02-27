@@ -54,7 +54,9 @@ openchief/
 pnpm build              # Build all packages (Turborepo)
 pnpm typecheck           # Type check everything
 pnpm dev                 # Start local dev servers
-pnpm seed                # Seed agent definitions from agents/ to D1
+pnpm seed                # Seed agent definitions from agents/ to D1 (auto-detects --local vs --remote)
+pnpm seed --remote       # Force seed to remote D1 (deployed instance)
+pnpm seed --local        # Force seed to local D1 (wrangler dev)
 pnpm run setup           # Interactive setup wizard (creates Cloudflare resources)
 pnpm generate-config     # Generate wrangler.jsonc files from openchief.config.ts
 pnpm run deploy          # Build + deploy all workers
@@ -138,7 +140,7 @@ Agents are **data, not code** — JSON configs in `agents/`. To add a new one:
 1. Create `agents/<id>.json` following the schema (see `agents/CLAUDE.md`)
 2. Required fields: `id`, `name`, `description`, `subscriptions`, `persona`, `outputs`, `enabled`
 3. Optional: `tools` (array of tool names the agent can use in chat), `visibility` (`"exec"` for private channel access)
-4. Seed to D1: `pnpm seed`
+4. Seed to D1: `pnpm seed` (auto-detects `--local` vs `--remote` from `openchief.config.ts`)
 5. The seed script reads ALL `.json` files from `agents/` — no other code changes needed
 6. Add an icon mapping in `workers/dashboard/src/components/AppSidebar.tsx` `agentIconMap`
 

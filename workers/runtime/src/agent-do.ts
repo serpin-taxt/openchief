@@ -225,6 +225,11 @@ export class AgentDurableObject extends DurableObject<Env> {
 
   /**
    * Alarm handler — triggers report generation or task execution.
+   *
+   * IMPORTANT: scheduleNextAlarm() MUST always run, even if the report or task
+   * throws.  Without it the alarm chain breaks and the agent goes silent until
+   * the next cron bootstrap (up to 24 h).  We wrap the work in try/catch and
+   * always reschedule afterwards.
    */
   async alarm(): Promise<void> {
     const config = await this.getAgentConfig();
@@ -236,21 +241,32 @@ export class AgentDurableObject extends DurableObject<Env> {
     const alarmType =
       (await this.ctx.storage.get<string>("pending_alarm_type")) || "daily";
 
-    if (alarmType === "task") {
-      // Task execution alarm
-      await this.executeNextTask(config);
-    } else {
-      // Report generation alarm
-      const reportConfig = config.outputs.reports.find(
-        (r) => r.cadence === "daily"
-      );
+    let generatedReport = false;
 
-      if (reportConfig) {
-        await this.generateReport(reportConfig, config);
+    try {
+      if (alarmType === "task") {
+        // Task execution alarm
+        await this.executeNextTask(config);
+      } else {
+        // Report generation alarm
+        const reportConfig = config.outputs.reports.find(
+          (r) => r.cadence === "daily"
+        );
+
+        if (reportConfig) {
+          await this.generateReport(reportConfig, config);
+          generatedReport = true;
+        }
       }
+    } catch (err) {
+      // Log but do NOT re-throw — we must reach scheduleNextAlarm below.
+      console.error(
+        `[${config.id}] alarm (${alarmType}) failed:`,
+        err instanceof Error ? err.message : err
+      );
     }
 
-    await this.scheduleNextAlarm(config);
+    await this.scheduleNextAlarm(config, generatedReport);
   }
 
   /**
@@ -1700,10 +1716,16 @@ export class AgentDurableObject extends DurableObject<Env> {
    * DOs only support one active alarm, so we compute both candidate times and
    * set the alarm for whichever comes first.
    */
-  private async scheduleNextAlarm(config: AgentDefinition): Promise<void> {
+  private async scheduleNextAlarm(
+    config: AgentDefinition,
+    justGeneratedReport = false
+  ): Promise<void> {
     const tz = this.env.REPORT_TIMEZONE || "America/Chicago";
 
     // Candidate 1: Next report time
+    // Only skip to tomorrow if we just successfully generated today's report.
+    // Otherwise keep today's slot eligible so task-check alarms don't starve
+    // the daily report.
     let nextReport: Date | null = null;
 
     const hasDaily = config.outputs.reports.some(
@@ -1712,7 +1734,7 @@ export class AgentDurableObject extends DurableObject<Env> {
 
     if (hasDaily) {
       const { hour, minute } = getAgentReportTime(config.id, config);
-      nextReport = nextWeekdayAlarm(hour, minute, tz, true);
+      nextReport = nextWeekdayAlarm(hour, minute, tz, justGeneratedReport);
     }
 
     // Candidate 2: Next task check (hourly, business hours 8am-6pm, weekdays only)

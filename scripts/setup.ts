@@ -11,7 +11,7 @@
  */
 
 import { createInterface } from "readline";
-import { writeFileSync, existsSync } from "fs";
+import { writeFileSync, existsSync, readdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
@@ -479,52 +479,23 @@ export default config;
   }
 
   // ── Run migrations ────────────────────────────────────────────────────
-  if (mode === "local") {
-    // Local mode — always run migrations (local D1 starts empty)
-    if (hasWrangler) {
-      print(`\n  ${c.dim}Applying local migrations...${c.reset}`);
-      const migrationsDir = resolve(ROOT, "migrations");
-      const files = [
-        "0001_create_events.sql",
-        "0002_create_agents.sql",
-        "0003_create_reports.sql",
-        "0004_create_revisions.sql",
-        "0005_create_identity_mappings.sql",
-        "0006_create_model_settings.sql",
-      ];
-      for (const file of files) {
-        const sqlPath = resolve(migrationsDir, file);
-        if (existsSync(sqlPath)) {
-          try {
-            run(`npx wrangler d1 execute openchief-db --local -c workers/router/wrangler.jsonc --file="${sqlPath}"`);
-            print(`  ${c.green}✓${c.reset} ${file}`);
-          } catch {
-            print(`  ${c.dim}⏭ ${file} (already applied)${c.reset}`);
-          }
-        }
-      }
-    }
-  } else if (d1DatabaseId && hasWrangler) {
-    // Deploy mode — auto-run migrations with --remote
-    print(`\n  ${c.dim}Applying remote migrations...${c.reset}`);
+  if (hasWrangler && (mode === "local" || d1DatabaseId)) {
+    const d1Flag = mode === "local" ? "--local" : "--remote";
+    print(`\n  ${c.dim}Applying ${mode === "local" ? "local" : "remote"} migrations...${c.reset}`);
     const migrationsDir = resolve(ROOT, "migrations");
-    const files = [
-      "0001_create_events.sql",
-      "0002_create_agents.sql",
-      "0003_create_reports.sql",
-      "0004_create_revisions.sql",
-      "0005_create_identity_mappings.sql",
-      "0006_create_model_settings.sql",
-    ];
+
+    // Auto-discover all .sql migration files, sorted by name
+    const files = readdirSync(migrationsDir)
+      .filter((f: string) => f.endsWith(".sql"))
+      .sort();
+
     for (const file of files) {
       const sqlPath = resolve(migrationsDir, file);
-      if (existsSync(sqlPath)) {
-        try {
-          run(`npx wrangler d1 execute openchief-db --remote -c workers/router/wrangler.jsonc --file="${sqlPath}"`);
-          print(`  ${c.green}✓${c.reset} ${file}`);
-        } catch {
-          print(`  ${c.dim}⏭ ${file} (already applied)${c.reset}`);
-        }
+      try {
+        run(`npx wrangler d1 execute openchief-db ${d1Flag} -c workers/router/wrangler.jsonc --file="${sqlPath}"`);
+        print(`  ${c.green}✓${c.reset} ${file}`);
+      } catch {
+        print(`  ${c.dim}⏭ ${file} (already applied)${c.reset}`);
       }
     }
   }

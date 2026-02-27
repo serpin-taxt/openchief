@@ -2,10 +2,18 @@
  * Seed agent definitions into D1.
  *
  * Usage:
- *   pnpm seed
+ *   pnpm seed            # auto-detects --local vs --remote from config
+ *   pnpm seed --local    # force local D1
+ *   pnpm seed --remote   # force remote D1
  *
  * Reads agent definition JSON files from agents/ and inserts them
  * into the D1 database using wrangler d1 execute.
+ *
+ * Detection logic (when no flag is passed):
+ *   - If OPENCHIEF_D1_MODE env var is set, uses that
+ *   - If openchief.config.ts exists and has a real accountId (not "local"),
+ *     defaults to --remote
+ *   - Otherwise defaults to --local
  */
 
 import { readFileSync, readdirSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
@@ -20,7 +28,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENTS_DIR = join(__dirname, "../agents");
 const DB_NAME = "openchief-db";
 const WRANGLER_CONFIG = join(__dirname, "../workers/router/wrangler.jsonc");
-const D1_MODE = process.env.OPENCHIEF_D1_MODE === "remote" ? "--remote" : "--local";
 
 /** Load openchief.config.ts if it exists (deployment-specific overrides) */
 async function loadConfig(): Promise<OpenChiefConfig | null> {
@@ -33,6 +40,35 @@ async function loadConfig(): Promise<OpenChiefConfig | null> {
     console.warn(`⚠ Could not load openchief.config.ts: ${err}`);
     return null;
   }
+}
+
+/**
+ * Resolve D1 mode (--local or --remote).
+ *
+ * Priority:
+ *   1. Explicit CLI flag: --local or --remote
+ *   2. OPENCHIEF_D1_MODE env var
+ *   3. Auto-detect from openchief.config.ts (real accountId → remote)
+ *   4. Default to --local
+ */
+function resolveD1Mode(config: OpenChiefConfig | null): string {
+  // 1. Explicit CLI flags
+  if (process.argv.includes("--remote")) return "--remote";
+  if (process.argv.includes("--local")) return "--local";
+
+  // 2. Env var (set by setup.ts)
+  if (process.env.OPENCHIEF_D1_MODE === "remote") return "--remote";
+  if (process.env.OPENCHIEF_D1_MODE === "local") return "--local";
+
+  // 3. Auto-detect from config — if there's a real Cloudflare account ID,
+  //    the user has deployed and almost certainly wants --remote
+  const accountId = config?.cloudflare?.accountId;
+  if (accountId && accountId !== "local" && accountId !== "local-placeholder") {
+    return "--remote";
+  }
+
+  // 4. Fallback
+  return "--local";
 }
 
 function generateULID(): string {
@@ -58,12 +94,12 @@ function sqlEscape(value: string): string {
 }
 
 /** Execute SQL via a temp file to avoid shell escaping issues */
-function execSQL(sql: string): void {
+function execSQL(sql: string, d1Mode: string): void {
   const tmpFile = join(tmpdir(), `openchief-seed-${Date.now()}.sql`);
   try {
     writeFileSync(tmpFile, sql);
     execSync(
-      `npx wrangler d1 execute ${DB_NAME} ${D1_MODE} -c "${WRANGLER_CONFIG}" --file="${tmpFile}"`,
+      `npx wrangler d1 execute ${DB_NAME} ${d1Mode} -c "${WRANGLER_CONFIG}" --file="${tmpFile}"`,
       { stdio: "inherit" }
     );
   } finally {
@@ -81,6 +117,18 @@ const channelFilters = config?.agents?.channelFilters ?? {};
 if (Object.keys(channelFilters).length > 0) {
   console.log(`Loaded channel filters for: ${Object.keys(channelFilters).join(", ")}`);
 }
+
+// Resolve D1 mode — auto-detects from config when no explicit flag is passed
+const D1_MODE = resolveD1Mode(config);
+console.log(`D1 mode: ${D1_MODE === "--remote" ? "remote" : "local"}${
+  process.argv.includes("--remote") || process.argv.includes("--local")
+    ? " (explicit)"
+    : process.env.OPENCHIEF_D1_MODE
+    ? " (from OPENCHIEF_D1_MODE env)"
+    : config?.cloudflare?.accountId && config.cloudflare.accountId !== "local"
+    ? " (auto-detected from config)"
+    : " (default)"
+}`);
 
 console.log(`Found ${agentFiles.length} agent definitions in agents/\n`);
 
@@ -122,7 +170,7 @@ for (const file of agentFiles) {
     `INSERT OR REPLACE INTO agent_revisions (id, agent_id, config, changed_by, change_note, created_at) VALUES ('${revId}', '${sqlEscape(agent.id)}', '${sqlEscape(JSON.stringify(agent))}', 'seed-script', 'Initial seed', '${now}');`
   );
 
-  execSQL(statements.join("\n"));
+  execSQL(statements.join("\n"), D1_MODE);
   console.log(`  ✓ Agent ${agent.id} seeded successfully`);
 }
 
