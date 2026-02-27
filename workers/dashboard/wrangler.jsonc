@@ -37,6 +37,18 @@
     {
       "binding": "CONNECTOR_FIGMA",
       "service": "openchief-connector-figma"
+    },
+    {
+      "binding": "CONNECTOR_JIRA",
+      "service": "openchief-connector-jira"
+    },
+    {
+      "binding": "CONNECTOR_JPD",
+      "service": "openchief-connector-jpd"
+    },
+    {
+      "binding": "CONNECTOR_JSM",
+      "service": "openchief-connector-jsm"
     }
   ],
   "vars": {

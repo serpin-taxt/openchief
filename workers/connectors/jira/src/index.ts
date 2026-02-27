@@ -9,10 +9,12 @@
  */
 
 import { runPoll, runBackfill } from "./poll";
+import { syncJiraIdentities } from "./identity-sync";
 import type { PollEnv } from "./poll";
 
 interface Env extends PollEnv {
   ADMIN_SECRET: string;
+  DB: D1Database;
 }
 
 function requireAdmin(request: Request, env: Env): Response | null {
@@ -59,6 +61,20 @@ export default {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Backfill failed";
         console.error("Jira backfill failed:", msg);
+        return jsonResponse({ ok: false, error: msg }, 500);
+      }
+    }
+
+    // POST /identity — sync Jira users to identity_mappings (admin only)
+    if (url.pathname === "/identity" && request.method === "POST") {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const result = await syncJiraIdentities(env);
+        return jsonResponse({ ok: true, result });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Identity sync failed";
+        console.error("Jira identity sync failed:", msg);
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }

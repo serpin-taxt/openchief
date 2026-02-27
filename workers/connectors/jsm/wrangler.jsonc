@@ -1,5 +1,5 @@
 {
-  "name": "openchief-connector-jpd",
+  "name": "openchief-connector-jsm",
   "main": "src/index.ts",
   "compatibility_date": "2025-02-01",
   "queues": {
@@ -24,6 +24,6 @@
     }
   ],
   "triggers": {
-    "crons": ["*/30 * * * *"]
+    "crons": ["*/15 * * * *"]
   }
 }

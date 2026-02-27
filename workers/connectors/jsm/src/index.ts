@@ -1,16 +1,17 @@
 /**
- * OpenChief Jira Product Discovery (JPD) Connector
+ * OpenChief Jira Service Management (JSM) Connector
  *
- * Polls the Jira REST API for JPD idea changes, status transitions, comments,
- * and prioritization updates. Normalizes them to OpenChiefEvent format and
- * publishes to the openchief-events queue.
+ * Polls the Jira Cloud REST API + JSM Service Desk API for service desk request
+ * changes, SLA breaches, CSAT feedback, and agent activity. Normalizes them to
+ * OpenChiefEvent format and publishes to the openchief-events queue.
  *
- * JPD ideas are stored as Jira issues with issuetype "Idea" in JPD projects.
- * This connector uses the standard Jira v3 API with JQL filtering.
+ * JSM requests are Jira issues with additional service desk metadata (SLA tracking,
+ * customer satisfaction, queues). This connector uses the Jira v3 API for issue data
+ * and the JSM-specific /rest/servicedeskapi/ endpoints for SLA and CSAT data.
  */
 
 import { runPoll, runBackfill } from "./poll";
-import { syncJpdIdentities } from "./identity-sync";
+import { syncJsmIdentities } from "./identity-sync";
 import type { PollEnv } from "./poll";
 
 interface Env extends PollEnv {
@@ -37,7 +38,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // POST /poll — manual trigger (admin only)
+    // POST /poll — manual trigger for polling (admin only)
     if (url.pathname === "/poll" && request.method === "POST") {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
@@ -46,7 +47,7 @@ export default {
         return jsonResponse({ ok: true, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Poll failed";
-        console.error("JPD poll failed:", msg);
+        console.error("JSM poll failed:", msg);
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }
@@ -61,21 +62,21 @@ export default {
         return jsonResponse({ ok: true, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Backfill failed";
-        console.error("JPD backfill failed:", msg);
+        console.error("JSM backfill failed:", msg);
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }
 
-    // POST /identity — sync JPD users to identity_mappings (admin only)
+    // POST /identity — sync JSM users to identity_mappings (admin only)
     if (url.pathname === "/identity" && request.method === "POST") {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
       try {
-        const result = await syncJpdIdentities(env);
+        const result = await syncJsmIdentities(env);
         return jsonResponse({ ok: true, result });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Identity sync failed";
-        console.error("JPD identity sync failed:", msg);
+        console.error("JSM identity sync failed:", msg);
         return jsonResponse({ ok: false, error: msg }, 500);
       }
     }
@@ -83,7 +84,7 @@ export default {
     // Health check
     if (url.pathname === "/" || url.pathname === "/health") {
       return jsonResponse({
-        service: "openchief-connector-jpd",
+        service: "openchief-connector-jsm",
         status: "ok",
       });
     }
@@ -91,15 +92,15 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 
-  // Scheduled handler — polls JPD on cron
+  // Scheduled handler — polls JSM API on cron
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     try {
       const result = await runPoll(env);
-      console.log("JPD scheduled poll:", JSON.stringify(result));
+      console.log("JSM scheduled poll:", JSON.stringify(result));
     } catch (err) {
       console.error(
-        "JPD poll failed:",
-        err instanceof Error ? err.message : err
+        "JSM poll failed:",
+        err instanceof Error ? err.message : err,
       );
     }
   },

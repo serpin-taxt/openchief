@@ -18,6 +18,10 @@
     {
       "source": "amplitude",
       "eventTypes": ["report.*", "metric.*"]
+    },
+    {
+      "source": "jsm",
+      "eventTypes": ["csat.*"]
     }
   ],
   "persona": {

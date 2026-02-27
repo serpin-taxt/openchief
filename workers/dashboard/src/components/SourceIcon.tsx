@@ -14,6 +14,7 @@ import {
   Database,
   Users,
   Lightbulb,
+  Headphones,
   Link,
   type LucideProps,
 } from "lucide-react";
@@ -35,6 +36,7 @@ const sourceIconMap: Record<string, ComponentType<LucideProps>> = {
   database: Database,
   rippling: Users,
   jpd: Lightbulb,
+  jsm: Headphones,
 };
 
 interface SourceIconProps {

@@ -16,8 +16,12 @@
       "eventTypes": ["issue.*", "sprint.*"]
     },
     {
-      "source": "jira-product-discovery",
+      "source": "jpd",
       "eventTypes": ["idea.*", "insight.*"]
+    },
+    {
+      "source": "jsm",
+      "eventTypes": ["request.breached", "request.resolved"]
     }
   ],
   "persona": {

@@ -316,6 +316,27 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
   },
+  jsm: {
+    displayName: "Jira Service Management",
+    workerName: "openchief-connector-jsm",
+    fields: [
+      { name: "JSM_API_EMAIL", label: "API Email", secret: false, placeholder: "you@company.com" },
+      { name: "JSM_API_TOKEN", label: "API Token", secret: true },
+      {
+        name: "JSM_INSTANCE_URL",
+        label: "Instance URL",
+        secret: false,
+        placeholder: "https://yourteam.atlassian.net",
+      },
+      {
+        name: "JSM_PROJECTS",
+        label: "Service Desk Projects (comma-separated)",
+        secret: false,
+        placeholder: "SD,ITSM",
+      },
+      { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -338,6 +359,7 @@ const SOURCE_TO_TOOL: Record<string, string> = {
   quickbooks: "quickbooks_query",
   rippling: "rippling_data",
   jpd: "jpd_query",
+  jsm: "jsm_query",
 };
 
 // ---------------------------------------------------------------------------

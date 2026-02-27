@@ -32,8 +32,12 @@
       "eventTypes": ["issue.*", "sprint.*"]
     },
     {
-      "source": "jira-product-discovery",
+      "source": "jpd",
       "eventTypes": ["idea.*", "insight.*"]
+    },
+    {
+      "source": "jsm",
+      "eventTypes": ["request.created", "request.resolved", "csat.*"]
     }
   ],
   "persona": {
