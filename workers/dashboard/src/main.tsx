@@ -18,3 +18,19 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js");
   });
 }
+
+// Capture the PWA install prompt so we can trigger it later.
+// Must be set up early — Chrome fires this once after installability is confirmed.
+let deferredInstallPrompt: Event | null = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Expose for debugging
+  (window as unknown as Record<string, unknown>).__pwaInstallPrompt = e;
+  console.log("[PWA] Install prompt available");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  console.log("[PWA] App installed successfully");
+});
