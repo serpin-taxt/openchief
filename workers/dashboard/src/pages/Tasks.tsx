@@ -215,7 +215,7 @@ export function Tasks() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
           <p className="text-sm text-muted-foreground">
-            Agent-proposed work items — prioritized by the CEO, executed
+            Agent-proposed work items — approve or reject, then executed
             autonomously
           </p>
         </div>

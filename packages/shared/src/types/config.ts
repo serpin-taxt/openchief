@@ -31,6 +31,13 @@ export interface OpenChiefConfig {
     kvNamespaceId: string;
     /** Queue name for event routing (default: "openchief-events") */
     queueName: string;
+    /**
+     * Prefix for all worker names and resource references (default: "openchief").
+     * Controls worker names (e.g. "{prefix}-runtime"), service bindings, DO script
+     * names, and D1 database names. Use a unique prefix per deployment to avoid
+     * naming collisions (e.g. "openchief-internal", "openchief-staging").
+     */
+    workerNamePrefix?: string;
     /** Vectorize index name for RAG (optional — RAG disabled when not set) */
     vectorizeIndexName?: string;
   };

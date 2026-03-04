@@ -194,7 +194,8 @@ async function main() {
     process.exit(1);
   }
 
-  const { accountId, d1DatabaseId, kvNamespaceId, queueName, vectorizeIndexName } = config.cloudflare;
+  const { accountId, d1DatabaseId, kvNamespaceId, queueName, vectorizeIndexName, workerNamePrefix } = config.cloudflare;
+  const namePrefix = workerNamePrefix || "openchief";
   const isLocalMode = accountId === "local" || d1DatabaseId === "local-placeholder";
 
   if (!isLocalMode) {
@@ -262,6 +263,13 @@ async function main() {
         /"openchief-events"/g,
         `"${queueName}"`
       );
+    }
+
+    // Replace worker name prefix throughout (worker names, service bindings, DO script names, D1 db names).
+    // Source repo uses "openchief-" as the default prefix. If a custom prefix is configured,
+    // rewrite all occurrences so service bindings, DO references, etc. stay in sync.
+    if (namePrefix !== "openchief") {
+      content = content.replace(/\bopenchief-/g, `${namePrefix}-`);
     }
 
     // Add or update account_id (skip for local mode — wrangler dev doesn't need it)

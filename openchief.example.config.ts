@@ -15,6 +15,7 @@ const config: OpenChiefConfig = {
     d1DatabaseId: "",
     kvNamespaceId: "",
     queueName: "openchief-events",
+    // workerNamePrefix: "openchief", // Unique prefix for worker names (e.g. "openchief-staging")
     vectorizeIndexName: "",
   },
 

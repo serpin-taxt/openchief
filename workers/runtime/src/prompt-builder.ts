@@ -98,7 +98,7 @@ You must output ONLY valid JSON matching this exact shape:
 {
   "headline": "One-line summary of the day (be specific, cite numbers)",
   "sections": [
-    ${reportConfig.sections.map((s) => `{ "name": "${s}", "body": "Markdown analysis", "severity": "info|warning|critical" }`).join(",\n    ")}
+    { "name": "highlights", "body": "Your 10 bullets go here as markdown", "severity": "info|warning|critical" }
   ],
   "actionItems": [
     { "description": "What needs attention", "priority": "low|medium|high|critical", "sourceUrl": "optional link", "assignee": "optional person" }
@@ -109,6 +109,11 @@ You must output ONLY valid JSON matching this exact shape:
   "healthSignal": "green|yellow|red"
 }
 
+CRITICAL: The "sections" array MUST contain EXACTLY ONE object with name "highlights". Do NOT create multiple sections. Do NOT create a section per topic. Everything goes into ONE section. The severity should reflect the worst issue in your bullets.
+
+TOPICS TO COVER (use these as your lens, but combine everything into the single highlights list — do NOT create separate sections for each topic):
+${reportConfig.sections.map((s) => `- ${s}`).join("\n")}
+
 ═══ TASK PROPOSALS ═══
 If your analysis reveals work that an agent could do autonomously — writing blog posts, researching competitors, analyzing trends, drafting documentation, building reports — propose up to 2 tasks. Be selective: only propose tasks when there's a clear, high-value need based on today's data. Do NOT propose tasks just because you can. Each task should:
 - Have a concrete, achievable deliverable
@@ -116,18 +121,16 @@ If your analysis reveals work that an agent could do autonomously — writing bl
 - Include reasoning tied to specific events or patterns you observed
 - Not duplicate any pending tasks listed below
 
-═══ ANALYSIS GUIDELINES ═══
-1. Be specific — cite PR numbers, exact metrics, names.
-2. Cross-reference events to build a narrative (e.g., PR opened → reviewed → merged is one story, not three).
-3. Don't double-count: a PR that was merged should not also appear as "open" or "blocked."
-4. For PRs: track lifecycle (opened → reviewed → merged/closed). A merged PR is done, not pending.
-5. Use the team member list to attribute work to real names.
-6. Compare against previous reports when available to identify trends.
-7. If there are few events, say so honestly rather than padding the report.
-8. Health signal: green = on track, yellow = some concerns, red = urgent issues.
-
-═══ OUTPUT CONSTRAINTS ═══
-CRITICAL: Keep your TOTAL JSON output under 4000 tokens. Each section body should be 2-4 concise paragraphs max. Prioritize the most important insights rather than covering everything. Use bullet points sparingly. Do NOT repeat the same information across sections.`;
+═══ OUTPUT FORMAT ═══
+Your entire report is a single bulleted list of up to 10 highlights:
+- Each bullet is 1-3 sentences. Lead with the most important fact.
+- Be specific: cite PR numbers, metric values, names, dates.
+- Cross-reference events into stories (PR opened → reviewed → merged is one bullet, not three).
+- If there are few events, use fewer bullets. Don't pad.
+- Use the team member list to attribute work to real names.
+- Compare against previous reports when available to identify trends.
+- Health signal: green = on track, yellow = some concerns, red = urgent issues.
+- Keep your TOTAL JSON output under 2000 tokens.`;
 }
 
 function buildUserPrompt(

@@ -17,7 +17,6 @@ interface DailyReport {
 }
 
 export interface MeetingTaskData {
-  proposedTasks: Task[];
   completedTasks: Task[];
 }
 
@@ -147,40 +146,28 @@ Produce a JSON response with this exact structure:
   "actionItems": [
     { "description": "What to do", "priority": "low|medium|high|critical", "sourceUrl": "optional URL", "assignee": "optional person/department" }
   ],
-  "taskDecisions": [
-    { "taskId": "task-id-from-queue", "action": "queue|cancel", "priority": 0-100, "notes": "optional rationale" }
-  ],
   "healthSignal": "green|yellow|red"
 }
-
-TASK QUEUE RULES:
-- Review each proposed task in the TASK QUEUE section below
-- For each task, decide: "queue" (approve for execution) or "cancel" (reject)
-- When queuing, set priority 0-100 (higher = more urgent). Use the strategic goals to determine priority.
-- Include a brief note explaining your decision
-- If no tasks are in the queue, omit taskDecisions or use an empty array
-- IMPORTANT: Approve a MAXIMUM of 6 tasks per day. Be ruthlessly selective — only queue work that directly advances strategic goals. Cancel the rest.
 
 The sections should be:
 ${reportConfig.sections.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
 SECTION DETAILS:
-- **meeting-transcript**: The FULL meeting simulation. Each speaker MUST sound like themselves — use their Voice and Personality from the roster above. A CFO who "speaks in numbers not feelings" should cite metrics and margins, not vague optimism. An Engineering Manager who is "ship-focused" should talk about blockers and velocity. If two people sound the same, you've failed. Use this format:
-  **[CEO]**: Opens meeting, frames today's agenda against strategic goals...
-  **[Engineering Manager]**: Presents findings in their own voice and style...
-  **[CEO]**: "How does this connect to [specific goal]?"
-  **[Product Manager]**: Responds in character, adds perspective...
-  (cross-functional discussion, debate, challenges, alignment checks)
-  **[CEO]**: Synthesizes, maps to goals, drives to decision...
-  Continue until all topics are covered. The CEO should frequently reference the mission, vision, values, and goals. Make it feel like a real executive meeting where each person has a distinct communication style — not a room of interchangeable corporate voices.
+- **meeting-transcript**: A fast-paced, natural conversation — NOT a series of formal presentations. Write it like a real meeting where people interrupt, react, push back, and riff off each other. Keep individual turns SHORT (1-3 sentences). Rules:
+  - People jump in without being called on. Someone cuts in mid-thought. Someone asks "wait, what?" and derails the agenda for a moment.
+  - No one gives a monologue. If someone talks for more than 3 sentences, someone else interrupts or reacts.
+  - Use their Voice and Personality — a terse CFO gives numbers not speeches, an impatient eng-manager cuts to the blocker.
+  - The CEO steers but doesn't dominate. They ask sharp questions, connect dots, and close threads.
+  - Include disagreements, "actually..."s, and people building on each other's points.
+  - Format: **[Name]**: Short dialogue. Keep the energy up. If it reads like a board presentation, rewrite it.
 
-- **strategic-alignment**: Map today's work to strategic goals. For each active goal, note what's advancing it, what's stalled, and what's missing. Flag any work that doesn't map to a goal. This is the most important section.
+- **strategic-alignment**: Bullet points mapping today's work to strategic goals. What's advancing each goal, what's stalled, what's missing. Flag unaligned work.
 
-- **daily-priorities**: Today's top priorities, each tagged with the strategic goal it serves. If a priority doesn't serve a goal, say so and recommend whether to continue or cut it.
+- **daily-priorities**: Bulleted priorities, each tagged with the strategic goal it serves.
 
-- **cross-functional-synergies**: Where departments should collaborate — specifically tied to accelerating strategic goals.
+- **cross-functional-synergies**: Bullets on where departments should collaborate to accelerate goals.
 
-- **action-items**: Concrete actions with owners. Each action item should reference the strategic goal it advances.
+- **action-items**: Bulleted actions with owners and the goal each advances.
 
 Respond ONLY with valid JSON, no markdown code fences.`;
 }
@@ -265,27 +252,6 @@ function buildMeetingUserPrompt(
     );
   }
 
-  // Task queue — proposed tasks awaiting CEO prioritization
-  if (taskData?.proposedTasks && taskData.proposedTasks.length > 0) {
-    parts.push("\n═══════════════════════════════════════════════════════════");
-    parts.push("TASK QUEUE — AWAITING YOUR PRIORITIZATION");
-    parts.push("For each task, decide: queue (approve with priority 0-100) or cancel.");
-    parts.push("═══════════════════════════════════════════════════════════");
-    for (const task of taskData.proposedTasks) {
-      const context = task.context
-        ? ` | Reasoning: ${task.context.reasoning}`
-        : "";
-      parts.push(
-        `\n[Task ID: ${task.id}]`
-      );
-      parts.push(`Title: ${task.title}`);
-      parts.push(`Description: ${task.description}`);
-      parts.push(`Proposed by: ${task.createdBy} → Assigned to: ${task.assignedTo || "unassigned"}`);
-      parts.push(`Current priority: ${task.priority}${context}`);
-    }
-    parts.push("");
-  }
-
   // Recently completed tasks — for meeting context
   if (taskData?.completedTasks && taskData.completedTasks.length > 0) {
     parts.push("\n═══════════════════════════════════════════════════════════");
@@ -304,11 +270,6 @@ function buildMeetingUserPrompt(
   parts.push(
     "\nNow facilitate the daily executive meeting. Listen to each department, ask how their work connects to our strategic goals, drive cross-functional discussion, and close with priorities mapped to goals."
   );
-  if (taskData?.proposedTasks && taskData.proposedTasks.length > 0) {
-    parts.push(
-      "Also review and prioritize the task queue — include taskDecisions in your JSON output for each proposed task."
-    );
-  }
   parts.push("\nRespond with JSON only.");
 
   return parts.join("\n");

@@ -286,6 +286,18 @@ Hidden identities (`is_active = 0`) are filtered out of the Team page by default
 - `scripts/generate-config.ts` reads the config and writes `wrangler.jsonc` files for all workers
 - Config covers: instance identity, Cloudflare resource IDs, runtime settings, auth, GitHub repo, connector enablement
 
+### Worker Name Prefix
+
+All worker names, service bindings, Durable Object script references, and D1 database names use a configurable prefix (default: `"openchief"`). Set `cloudflare.workerNamePrefix` in your config to use a different prefix:
+
+```typescript
+cloudflare: {
+  workerNamePrefix: "openchief-internal", // → openchief-internal-runtime, openchief-internal-dashboard, etc.
+}
+```
+
+The `generate-config.ts` script replaces all `openchief-` references in `wrangler.jsonc` files with `{prefix}-`. This ensures service bindings (e.g. dashboard → runtime) always reference the correct worker names. **This is critical** — a mismatch here means the dashboard calls a stale/nonexistent worker.
+
 ## Auth
 
 Three auth modes, configured via `auth.provider` in `openchief.config.ts`:

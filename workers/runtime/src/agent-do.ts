@@ -12,12 +12,12 @@ import type { IdentityInfo, OrgInfo, PendingTask } from "./prompt-builder";
 import { buildChatSystemPrompt } from "./chat-prompt";
 import { buildMeetingPrompt } from "./meeting-prompt";
 import type { MeetingTaskData } from "./meeting-prompt";
-import { parseReportContent, parseTaskProposals, parseTaskDecisions } from "./report-parser";
+import { parseReportContent, parseTaskProposals } from "./report-parser";
 import { buildTaskExecutionPrompt } from "./task-prompt";
 import { getAgentTools, executeTool } from "./agent-tools";
 import type { ToolDefinition } from "./agent-tools";
 import { retrieveContext, indexReport } from "./rag";
-import { postReportToSlack } from "./slack-post";
+import { postReportToSlack, postTaskProposalToSlack } from "./slack-post";
 
 // ---------------------------------------------------------------------------
 // Staggered report schedule
@@ -1066,6 +1066,21 @@ export class AgentDurableObject extends DurableObject<Env> {
 
     const content = parseReportContent(response.text);
 
+    // Enforce single-section format for non-meeting reports.
+    // Claude sometimes ignores the "EXACTLY ONE section" instruction and returns
+    // multiple sections. Collapse them into a single "highlights" section.
+    if (!isCeoMeeting && content.sections.length > 1) {
+      const mergedBody = content.sections.map((s) => s.body).join("\n\n");
+      const worstSeverity = content.sections.some((s) => s.severity === "critical")
+        ? "critical"
+        : content.sections.some((s) => s.severity === "warning")
+          ? "warning"
+          : "info";
+      content.sections = [
+        { name: "highlights", body: mergedBody, severity: worstSeverity },
+      ];
+    }
+
     const reportId = generateULID();
     const now = asOf
       ? new Date(asOf + "T14:00:00Z").toISOString()
@@ -1152,8 +1167,8 @@ export class AgentDurableObject extends DurableObject<Env> {
         };
         const proposals = parseTaskProposals(response.text);
 
-        // Enforce daily cap of 5 proposals per agent
-        const DAILY_TASK_LIMIT = 5;
+        // Enforce daily cap of 3 proposals per agent
+        const DAILY_TASK_LIMIT = 3;
         const today = now.split("T")[0]; // "YYYY-MM-DD"
         const countResult = await this.env.DB.prepare(
           `SELECT COUNT(*) as count FROM tasks
@@ -1199,61 +1214,32 @@ export class AgentDurableObject extends DurableObject<Env> {
           console.log(
             `Task proposed by ${config.id}: "${proposal.title}" → ${proposal.assignTo}`
           );
-        }
-      } catch (err) {
-        console.error("Failed to insert task proposals:", err);
-      }
-    }
 
-    // Process CEO task decisions (CEO meetings only)
-    if (isCeoMeeting) {
-      try {
-        const decisions = parseTaskDecisions(response.text);
-
-        // Enforce daily cap of 6 queued tasks
-        const DAILY_QUEUE_LIMIT = 6;
-        const today = now.split("T")[0];
-        const queuedToday = await this.env.DB.prepare(
-          `SELECT COUNT(*) as count FROM tasks
-           WHERE status IN ('queued', 'in_progress', 'completed')
-             AND updated_at >= ? AND updated_at < ?`
-        )
-          .bind(`${today}T00:00:00.000Z`, `${today}T23:59:59.999Z`)
-          .first<{ count: number }>();
-        let queuedCount = queuedToday?.count ?? 0;
-
-        for (const decision of decisions) {
-          if (decision.action === "queue") {
-            if (queuedCount >= DAILY_QUEUE_LIMIT) {
-              console.log(
-                `Daily queue limit (${DAILY_QUEUE_LIMIT}) reached — skipping task ${decision.taskId}`
-              );
-              continue;
-            }
-            await this.env.DB.prepare(
-              `UPDATE tasks SET status = 'queued', priority = ?, updated_at = ?
-               WHERE id = ? AND status = 'proposed'`
-            )
-              .bind(decision.priority, now, decision.taskId)
-              .run();
-            queuedCount++;
-            console.log(
-              `CEO queued task ${decision.taskId} with priority ${decision.priority}${decision.notes ? `: ${decision.notes}` : ""}`
-            );
-          } else if (decision.action === "cancel") {
-            await this.env.DB.prepare(
-              `UPDATE tasks SET status = 'cancelled', updated_at = ?
-               WHERE id = ? AND status = 'proposed'`
-            )
-              .bind(now, decision.taskId)
-              .run();
-            console.log(
-              `CEO cancelled task ${decision.taskId}${decision.notes ? `: ${decision.notes}` : ""}`
+          // Post task proposal to Slack for human approval (non-blocking)
+          if (config.slackChannelId) {
+            this.ctx.waitUntil(
+              (async () => {
+                try {
+                  const slackToken = await this.env.KV.get("connector-secret:slack:SLACK_BOT_TOKEN");
+                  if (!slackToken) return;
+                  await postTaskProposalToSlack(slackToken, config.slackChannelId!, {
+                    id: taskId,
+                    title: proposal.title,
+                    description: proposal.description,
+                    priority: proposal.priority,
+                    createdBy: config.name,
+                    assignedTo: proposal.assignTo,
+                  });
+                  console.log(`Posted task proposal "${proposal.title}" to Slack for approval`);
+                } catch (err) {
+                  console.error(`Failed to post task proposal to Slack:`, err);
+                }
+              })()
             );
           }
         }
       } catch (err) {
-        console.error("Failed to process CEO task decisions:", err);
+        console.error("Failed to insert task proposals:", err);
       }
     }
 
@@ -1359,19 +1345,9 @@ export class AgentDurableObject extends DurableObject<Env> {
       }
     }
 
-    // Load task data for the meeting
+    // Load recently completed tasks for meeting context
     let taskData: MeetingTaskData | undefined;
     try {
-      // Proposed tasks awaiting prioritization
-      const proposedRows = await this.env.DB.prepare(
-        `SELECT id, title, description, status, priority, created_by, assigned_to,
-                source_report_id, output, context, started_at, completed_at,
-                due_by, tokens_used, created_at, updated_at
-         FROM tasks WHERE status = 'proposed'
-         ORDER BY priority DESC, created_at ASC LIMIT 20`
-      ).all();
-
-      // Recently completed tasks (last 48h)
       const completedCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
       const completedRows = await this.env.DB.prepare(
         `SELECT id, title, description, status, priority, created_by, assigned_to,
@@ -1400,17 +1376,17 @@ export class AgentDurableObject extends DurableObject<Env> {
         updatedAt: r.updated_at as string,
       });
 
-      taskData = {
-        proposedTasks: (proposedRows.results || []).map(mapRow),
-        completedTasks: (completedRows.results || []).map(mapRow),
-      };
+      const completedTasks = (completedRows.results || []).map(mapRow);
+      if (completedTasks.length > 0) {
+        taskData = { completedTasks };
+      }
     } catch (err) {
       console.error("Failed to load tasks for CEO meeting:", err);
     }
 
     console.log(
       `CEO meeting: synthesizing ${dailyReports.length} department reports from ${agentConfigs.length} agents` +
-      (taskData ? `, ${taskData.proposedTasks.length} proposed tasks, ${taskData.completedTasks.length} completed tasks` : "")
+      (taskData ? `, ${taskData.completedTasks.length} completed tasks` : "")
     );
 
     return buildMeetingPrompt(

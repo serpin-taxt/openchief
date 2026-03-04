@@ -205,71 +205,54 @@ export function formatMeetingForSlack(
 }
 
 /**
- * Format a daily agent report as an array of Slack messages.
- * Each message becomes a separate post in a thread:
- *   1. Headline with health signal (parent message)
- *   2–N. One message per report section
- *   Last. Action items summary
+ * Format the parent message for a daily agent report (headline only).
  */
-export function formatReportForSlack(
+function formatReportHeadline(
   agentName: string,
   content: ReportContent,
-  reportId: string
-): string[] {
-  const messages: string[] = [];
-
-  // Parent message: health + agent name + headline
+): string {
   const healthEmoji =
     content.healthSignal === "green"
       ? ":large_green_circle:"
       : content.healthSignal === "yellow"
         ? ":large_yellow_circle:"
         : ":red_circle:";
-  messages.push(
-    `${healthEmoji} *${agentName} — Daily Report*\n> ${content.headline}\n\n_${content.sections.length} sections below in thread_`
-  );
-
-  // One message per section
-  for (const section of content.sections) {
-    const severityPrefix =
-      section.severity === "critical"
-        ? ":red_circle: "
-        : section.severity === "warning"
-          ? ":warning: "
-          : "";
-    // Title-case the section name for readability
-    const title = section.name
-      .split("-")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-    const body = markdownToSlackMrkdwn(section.body);
-    messages.push(`${severityPrefix}*${title}*\n${body}`);
-  }
-
-  // Final message: action items
-  if (content.actionItems.length > 0) {
-    const lines = ["*Action Items*"];
-    for (const item of content.actionItems) {
-      const emoji =
-        item.priority === "critical"
-          ? ":rotating_light:"
-          : item.priority === "high"
-            ? ":exclamation:"
-            : item.priority === "medium"
-              ? ":small_blue_diamond:"
-              : ":small_orange_diamond:";
-      const assignee = item.assignee ? ` _(${item.assignee})_` : "";
-      lines.push(`${emoji} ${item.description}${assignee}`);
-    }
-    messages.push(lines.join("\n"));
-  }
-
-  return messages;
+  return `${healthEmoji} *${agentName} — Daily Report*\n> ${content.headline}`;
 }
 
 /**
- * Post a full agent report to a Slack channel as a threaded conversation.
- * The first message is the headline (parent); sections + action items follow as replies.
+ * Split report body into individual bullet points.
+ * Each bullet becomes its own Slack thread message.
+ */
+function splitBullets(content: ReportContent): string[] {
+  const body = content.sections.map((s) => s.body).join("\n\n");
+  const converted = markdownToSlackMrkdwn(body);
+
+  // Split on lines that start with "- " or "• ", keeping the marker
+  const bullets: string[] = [];
+  let current = "";
+  for (const line of converted.split("\n")) {
+    if (/^[-•] /.test(line) && current) {
+      bullets.push(current.trim());
+      current = line;
+    } else if (/^[-•] /.test(line)) {
+      current = line;
+    } else {
+      // Continuation line (wrapped text within the same bullet)
+      current += "\n" + line;
+    }
+  }
+  if (current.trim()) {
+    bullets.push(current.trim());
+  }
+
+  return bullets;
+}
+
+/**
+ * Post an agent report to a Slack channel as headline + one thread reply per bullet.
+ * Parent message = headline only (avoids channel spam).
+ * Thread replies = one message per bullet point.
  */
 export async function postReportToSlack(
   token: string,
@@ -278,18 +261,105 @@ export async function postReportToSlack(
   content: ReportContent,
   reportId: string
 ): Promise<void> {
-  const messages = formatReportForSlack(agentName, content, reportId);
-  if (messages.length === 0) return;
-
-  // Post headline as parent message
-  const first = await postToSlack(token, channelId, messages[0]);
-  if (!first.ok || !first.ts) {
-    console.error(`Failed to post report headline to Slack: ${first.error}`);
+  const headline = formatReportHeadline(agentName, content);
+  const parent = await postToSlack(token, channelId, headline);
+  if (!parent.ok || !parent.ts) {
+    console.error(`Failed to post ${agentName} report headline to Slack: ${parent.error}`);
     return;
   }
 
-  // Post remaining messages as thread replies
-  for (const msg of messages.slice(1)) {
-    await postToSlack(token, channelId, msg, first.ts);
+  // Post each bullet as a separate thread reply
+  const bullets = splitBullets(content);
+  for (const bullet of bullets) {
+    if (bullet.trim()) {
+      await postToSlack(token, channelId, bullet, parent.ts);
+    }
+  }
+}
+
+/**
+ * Post a task proposal to Slack with interactive approve/reject buttons.
+ */
+export async function postTaskProposalToSlack(
+  token: string,
+  channelId: string,
+  task: {
+    id: string;
+    title: string;
+    description: string;
+    priority: string;
+    createdBy: string;
+    assignedTo: string;
+  }
+): Promise<void> {
+  const priorityEmoji =
+    task.priority === "critical"
+      ? ":rotating_light:"
+      : task.priority === "high"
+        ? ":exclamation:"
+        : task.priority === "medium"
+          ? ":small_blue_diamond:"
+          : ":small_orange_diamond:";
+
+  const text = `${priorityEmoji} *New Task Proposed*\n*${task.title}*\n${task.description}\n\n_Proposed by ${task.createdBy} · Assigned to ${task.assignedTo} · Priority: ${task.priority}_`;
+
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${priorityEmoji} *New Task Proposed*\n*${task.title}*`,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: task.description.slice(0, MAX_BLOCK_TEXT),
+      },
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `Proposed by *${task.createdBy}* · Assigned to *${task.assignedTo}* · Priority: *${task.priority}*`,
+        },
+      ],
+    },
+    {
+      type: "actions",
+      block_id: `task_actions_${task.id}`,
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Approve", emoji: true },
+          style: "primary",
+          action_id: "task_approve",
+          value: task.id,
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Reject", emoji: true },
+          style: "danger",
+          action_id: "task_reject",
+          value: task.id,
+        },
+      ],
+    },
+  ];
+
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ channel: channelId, text, blocks }),
+  });
+
+  const result = (await response.json()) as { ok: boolean; error?: string };
+  if (!result.ok) {
+    console.error(`Slack task proposal post error: ${result.error}`);
   }
 }

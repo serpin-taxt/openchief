@@ -23,6 +23,12 @@
       "database_id": "REPLACE_WITH_D1_DATABASE_ID"
     }
   ],
+  "services": [
+    {
+      "binding": "AGENT_RUNTIME",
+      "service": "openchief-runtime"
+    }
+  ],
   "triggers": {
     "crons": ["*/30 * * * *"]
   }
@@ -30,4 +36,5 @@
   //   SLACK_BOT_TOKEN
   //   SLACK_SIGNING_SECRET
   //   ADMIN_SECRET
+  //   RUNTIME_ADMIN_SECRET — must match runtime's ADMIN_SECRET (for AI chat)
 }

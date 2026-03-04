@@ -23,6 +23,12 @@ interface Env {
   IGNORE_BOTS?: string;
   KV: KVNamespace;
   DB: D1Database;
+  /** Service binding to runtime worker — enables AI split-view chat when configured */
+  AGENT_RUNTIME?: Fetcher;
+  /** Bearer token for runtime /chat endpoint — must match runtime's ADMIN_SECRET */
+  RUNTIME_ADMIN_SECRET?: string;
+  /** Email of the superadmin user — always gets exec access to all agents */
+  SUPERADMIN_EMAIL?: string;
 }
 
 function requireAdmin(request: Request, env: Env): Response | null {
@@ -90,6 +96,35 @@ export default {
         const msg = err instanceof Error ? err.message : "Failed to list channels";
         return Response.json({ ok: false, error: msg }, { status: 500 });
       }
+    }
+
+    // POST /interactive -- Slack interactive payload (button clicks)
+    if (url.pathname === "/interactive" && request.method === "POST") {
+      const body = await request.text();
+
+      // Verify Slack signature
+      const timestamp = request.headers.get("x-slack-request-timestamp");
+      const signature = request.headers.get("x-slack-signature");
+      const valid = await verifySlackSignature(
+        body,
+        timestamp,
+        signature,
+        env.SLACK_SIGNING_SECRET
+      );
+      if (!valid) {
+        return new Response("Invalid signature", { status: 401 });
+      }
+
+      // Parse the payload (sent as application/x-www-form-urlencoded)
+      const params = new URLSearchParams(body);
+      const payloadStr = params.get("payload");
+      if (!payloadStr) {
+        return new Response("Missing payload", { status: 400 });
+      }
+
+      // Process in background — Slack requires 200 within 3 seconds
+      ctx.waitUntil(handleInteractivePayload(JSON.parse(payloadStr), env));
+      return new Response("", { status: 200 });
     }
 
     // POST /webhook -- Slack Events API endpoint
@@ -165,6 +200,47 @@ async function handleEventCallback(
   try {
     const slackEvent = parsed.event as Record<string, unknown>;
     if (!slackEvent) return;
+
+    const eventType = slackEvent.type as string;
+
+    // ---- AI Assistant Events (split-view chat) ----
+    // Only active when AGENT_RUNTIME service binding is configured
+    if (env.AGENT_RUNTIME && env.RUNTIME_ADMIN_SECRET) {
+      const aiEnv = {
+        SLACK_BOT_TOKEN: env.SLACK_BOT_TOKEN,
+        KV: env.KV,
+        DB: env.DB,
+        AGENT_RUNTIME: env.AGENT_RUNTIME,
+        RUNTIME_ADMIN_SECRET: env.RUNTIME_ADMIN_SECRET,
+        SUPERADMIN_EMAIL: env.SUPERADMIN_EMAIL,
+      };
+
+      if (eventType === "assistant_thread_started") {
+        const { handleAssistantThreadStarted } = await import("./ai-chat");
+        await handleAssistantThreadStarted(slackEvent, aiEnv);
+        return;
+      }
+
+      if (eventType === "assistant_thread_context_changed") {
+        const { handleAssistantThreadContextChanged } = await import("./ai-chat");
+        await handleAssistantThreadContextChanged(slackEvent, aiEnv);
+        return;
+      }
+
+      // DM messages: check if this is an assistant thread before normal processing
+      const channelType = slackEvent.channel_type as string | undefined;
+      if (eventType === "message" && channelType === "im") {
+        // Skip bot's own messages to prevent loops
+        if (slackEvent.bot_id || slackEvent.subtype === "bot_message") return;
+
+        const { handleAssistantMessage } = await import("./ai-chat");
+        const handled = await handleAssistantMessage(slackEvent, aiEnv);
+        if (handled) return;
+        // Not an assistant thread — fall through to normal event processing
+      }
+    }
+
+    // ---- Standard event processing ----
 
     // Get workspace name
     const workspaceName = await getCachedWorkspaceName(env);
@@ -247,4 +323,107 @@ async function getCachedChannelInfo(
     if (found) return { name: found.name, isPrivate: found.is_private ?? false };
   }
   return { name: undefined, isPrivate: false };
+}
+
+// --- Interactive Payload (Task Approve/Reject Buttons) -------------------------
+
+interface SlackInteractivePayload {
+  type: string;
+  user: { id: string; username: string; name?: string };
+  actions: Array<{
+    action_id: string;
+    value: string;
+    block_id: string;
+  }>;
+  response_url: string;
+  message?: Record<string, unknown>;
+}
+
+async function handleInteractivePayload(
+  payload: SlackInteractivePayload,
+  env: Env
+): Promise<void> {
+  try {
+    if (payload.type !== "block_actions" || !payload.actions?.length) return;
+
+    const action = payload.actions[0];
+    const taskId = action.value;
+    const actionId = action.action_id;
+    const userName = payload.user.name || payload.user.username;
+    const now = new Date().toISOString();
+
+    if (actionId === "task_approve") {
+      await env.DB.prepare(
+        `UPDATE tasks SET status = 'queued', updated_at = ?
+         WHERE id = ? AND status = 'proposed'`
+      )
+        .bind(now, taskId)
+        .run();
+
+      // Update the Slack message to reflect approval
+      await fetch(payload.response_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replace_original: true,
+          text: `Task approved by ${userName}`,
+          blocks: replaceActionsWithStatus(
+            payload.message,
+            action.block_id,
+            `:white_check_mark: *Approved* by ${userName}`
+          ),
+        }),
+      });
+
+      console.log(`Task ${taskId} approved by ${userName}`);
+    } else if (actionId === "task_reject") {
+      await env.DB.prepare(
+        `UPDATE tasks SET status = 'cancelled', updated_at = ?
+         WHERE id = ? AND status = 'proposed'`
+      )
+        .bind(now, taskId)
+        .run();
+
+      // Update the Slack message to reflect rejection
+      await fetch(payload.response_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replace_original: true,
+          text: `Task rejected by ${userName}`,
+          blocks: replaceActionsWithStatus(
+            payload.message,
+            action.block_id,
+            `:x: *Rejected* by ${userName}`
+          ),
+        }),
+      });
+
+      console.log(`Task ${taskId} rejected by ${userName}`);
+    }
+  } catch (err) {
+    console.error("Interactive payload error:", err);
+  }
+}
+
+/**
+ * Replace the actions block (buttons) with a context block showing the decision.
+ * Preserves all other blocks (title, description, metadata).
+ */
+function replaceActionsWithStatus(
+  message: Record<string, unknown> | undefined,
+  actionBlockId: string,
+  statusText: string
+): Array<Record<string, unknown>> {
+  const originalBlocks = (message?.blocks as Array<Record<string, unknown>>) || [];
+
+  return originalBlocks.map((block) => {
+    if (block.block_id === actionBlockId) {
+      return {
+        type: "context",
+        elements: [{ type: "mrkdwn", text: statusText }],
+      };
+    }
+    return block;
+  });
 }
