@@ -5,15 +5,24 @@
   "subscriptions": [
     {
       "source": "intercom",
-      "eventTypes": ["conversation.*", "ticket.*"]
+      "eventTypes": [
+        "conversation.*",
+        "ticket.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "jsm",
-      "eventTypes": ["request.*", "csat.*"]
+      "eventTypes": [
+        "request.*",
+        "csat.*"
+      ]
     }
   ],
   "persona": {
@@ -35,10 +44,18 @@
       {
         "reportType": "daily-support-digest",
         "cadence": "daily",
-        "sections": ["volume-and-response-times", "top-issues", "escalations", "customer-sentiment"]
+        "sections": [
+          "volume-and-response-times",
+          "top-issues",
+          "escalations",
+          "customer-sentiment"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events"]
+  "tools": [
+    "query_events"
+  ],
+  "proposeTasks": true
 }

@@ -5,15 +5,25 @@
   "subscriptions": [
     {
       "source": "figma",
-      "eventTypes": ["file.*", "comment.*", "library.*"]
+      "eventTypes": [
+        "file.*",
+        "comment.*",
+        "library.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "github",
-      "eventTypes": ["release.*", "deploy.*"]
+      "eventTypes": [
+        "release.*",
+        "deploy.*"
+      ]
     }
   ],
   "persona": {
@@ -35,10 +45,18 @@
       {
         "reportType": "daily-design-digest",
         "cadence": "daily",
-        "sections": ["active-design-work", "design-reviews", "design-system-health", "cross-functional-signals"]
+        "sections": [
+          "active-design-work",
+          "design-reviews",
+          "design-system-health",
+          "cross-functional-signals"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events"]
+  "tools": [
+    "query_events"
+  ],
+  "proposeTasks": true
 }

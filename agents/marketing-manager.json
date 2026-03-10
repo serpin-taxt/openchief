@@ -5,19 +5,32 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "discord",
-      "eventTypes": ["message.*", "thread.*", "member.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*",
+        "member.*"
+      ]
     },
     {
       "source": "twitter",
-      "eventTypes": ["tweet.*", "mention.*", "search.*"]
+      "eventTypes": [
+        "tweet.*",
+        "mention.*",
+        "search.*"
+      ]
     },
     {
       "source": "googleanalytics",
-      "eventTypes": ["report.*"]
+      "eventTypes": [
+        "report.*"
+      ]
     }
   ],
   "persona": {
@@ -44,10 +57,21 @@
       {
         "reportType": "daily-marketing-pulse",
         "cadence": "daily",
-        "sections": ["social-performance", "content-status", "community-health", "campaign-updates", "competitive-signals", "marketing-priorities"]
+        "sections": [
+          "social-performance",
+          "content-status",
+          "community-health",
+          "campaign-updates",
+          "competitive-signals",
+          "marketing-priorities"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "twitter_search"]
+  "tools": [
+    "query_events",
+    "twitter_search"
+  ],
+  "proposeTasks": true
 }

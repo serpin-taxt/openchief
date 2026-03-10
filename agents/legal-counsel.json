@@ -5,7 +5,10 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     }
   ],
   "persona": {
@@ -32,9 +35,17 @@
       {
         "reportType": "daily-legal-scan",
         "cadence": "daily",
-        "sections": ["immediate-flags", "regulatory-signals", "contract-risks", "ip-concerns", "privacy-signals", "legal-health-summary"]
+        "sections": [
+          "immediate-flags",
+          "regulatory-signals",
+          "contract-risks",
+          "ip-concerns",
+          "privacy-signals",
+          "legal-health-summary"
+        ]
       }
     ]
   },
-  "enabled": true
+  "enabled": true,
+  "proposeTasks": true
 }

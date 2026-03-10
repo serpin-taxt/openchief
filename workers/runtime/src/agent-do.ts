@@ -1012,7 +1012,7 @@ export class AgentDurableObject extends DurableObject<Env> {
 
     // Load pending tasks so agents don't propose duplicates
     let pendingTasks: PendingTask[] = [];
-    if (!isCeoMeeting) {
+    if (!isCeoMeeting && config.proposeTasks !== false) {
       try {
         const taskRows = await this.env.DB.prepare(
           `SELECT title, assigned_to, status FROM tasks
@@ -1156,8 +1156,8 @@ export class AgentDurableObject extends DurableObject<Env> {
       );
     }
 
-    // Extract and insert task proposals (non-CEO reports only)
-    if (!isCeoMeeting) {
+    // Extract and insert task proposals (non-CEO reports only, when enabled)
+    if (!isCeoMeeting && config.proposeTasks !== false) {
       try {
         const PRIORITY_MAP: Record<string, number> = {
           low: 20,

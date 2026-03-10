@@ -5,11 +5,18 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "rippling",
-      "eventTypes": ["employee.*", "timeoff.*", "org.*"]
+      "eventTypes": [
+        "employee.*",
+        "timeoff.*",
+        "org.*"
+      ]
     }
   ],
   "persona": {
@@ -36,10 +43,17 @@
       {
         "reportType": "daily-people-pulse",
         "cadence": "daily",
-        "sections": ["team-sentiment", "hiring-pipeline", "onboarding-status", "culture-signals", "hr-changes"]
+        "sections": [
+          "team-sentiment",
+          "hiring-pipeline",
+          "onboarding-status",
+          "culture-signals",
+          "hr-changes"
+        ]
       }
     ]
   },
   "enabled": true,
-  "visibility": "exec"
+  "visibility": "exec",
+  "proposeTasks": true
 }

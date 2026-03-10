@@ -233,9 +233,9 @@ export async function handleAssistantThreadStarted(
  */
 async function findContextAgent(
   contextChannelId: string,
-  agents: Array<{ id: string; name: string; visibility?: string | null }>,
+  agents: Array<{ id: string; name: string; visibility: string | null }>,
   env: AiChatEnv
-): Promise<{ id: string; name: string } | null> {
+): Promise<{ id: string; name: string; visibility: string | null } | null> {
   // Resolve channel name from KV cache
   const channelListRaw = await env.KV.get("slack:channels:list");
   if (!channelListRaw) return null;

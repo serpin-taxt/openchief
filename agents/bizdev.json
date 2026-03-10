@@ -5,15 +5,25 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "twitter",
-      "eventTypes": ["tweet.*", "mention.*", "search.*"]
+      "eventTypes": [
+        "tweet.*",
+        "mention.*",
+        "search.*"
+      ]
     },
     {
       "source": "notion",
-      "eventTypes": ["page.*", "database.*"]
+      "eventTypes": [
+        "page.*",
+        "database.*"
+      ]
     }
   ],
   "persona": {
@@ -38,10 +48,20 @@
       {
         "reportType": "daily-bd-pulse",
         "cadence": "daily",
-        "sections": ["pipeline-snapshot", "deal-updates", "new-opportunities", "competitive-intel", "bd-health-summary"]
+        "sections": [
+          "pipeline-snapshot",
+          "deal-updates",
+          "new-opportunities",
+          "competitive-intel",
+          "bd-health-summary"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "twitter_search"]
+  "tools": [
+    "query_events",
+    "twitter_search"
+  ],
+  "proposeTasks": true
 }

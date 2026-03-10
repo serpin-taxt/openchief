@@ -103,9 +103,9 @@ You must output ONLY valid JSON matching this exact shape:
   "actionItems": [
     { "description": "What needs attention", "priority": "low|medium|high|critical", "sourceUrl": "optional link", "assignee": "optional person" }
   ],
-  "taskProposals": [
+${config.proposeTasks !== false ? `  "taskProposals": [
     { "title": "Short task title", "description": "What the task involves and expected deliverable", "assignTo": "agent-id to assign (e.g. eng-manager, marketing-manager)", "priority": "low|medium|high|critical", "context": { "reasoning": "Why this task is needed based on today's data" } }
-  ],
+  ],` : ""}
   "healthSignal": "green|yellow|red"
 }
 
@@ -114,17 +114,17 @@ CRITICAL: The "sections" array MUST contain EXACTLY ONE object with name "highli
 TOPICS TO COVER (use these as your lens, but combine everything into the single highlights list — do NOT create separate sections for each topic):
 ${reportConfig.sections.map((s) => `- ${s}`).join("\n")}
 
-═══ TASK PROPOSALS ═══
+${config.proposeTasks !== false ? `═══ TASK PROPOSALS ═══
 If your analysis reveals work that an agent could do autonomously — writing blog posts, researching competitors, analyzing trends, drafting documentation, building reports — propose up to 2 tasks. Be selective: only propose tasks when there's a clear, high-value need based on today's data. Do NOT propose tasks just because you can. Each task should:
 - Have a concrete, achievable deliverable
 - Be assigned to the most appropriate agent by their ID
 - Include reasoning tied to specific events or patterns you observed
-- Not duplicate any pending tasks listed below
+- Not duplicate any pending tasks listed below` : ""}
 
 ═══ OUTPUT FORMAT ═══
 Your entire report is a single bulleted list of up to 10 highlights:
 - Each bullet is 1-3 sentences. Lead with the most important fact.
-- Be specific: cite PR numbers, metric values, names, dates.
+- Be specific: cite PR numbers, metric values, names, dates. When referencing tweets, ALWAYS include the tweet URL in markdown link format.
 - Cross-reference events into stories (PR opened → reviewed → merged is one bullet, not three).
 - If there are few events, use fewer bullets. Don't pad.
 - Use the team member list to attribute work to real names.
@@ -245,22 +245,26 @@ function extractPayloadDetail(evt: EventRow): string | null {
       return `  Text: ${(payload.text as string).slice(0, 500)}`;
     }
 
-    // Twitter/X — include tweet text
+    // Twitter/X — include tweet text and URL
     if (evt.source === "twitter" && payload.text) {
-      return `  Tweet: ${(payload.text as string).slice(0, 500)}`;
+      const url = payload.url ? `\n  URL: ${payload.url}` : "";
+      return `  Tweet: ${(payload.text as string).slice(0, 500)}${url}`;
     }
 
     // Enriched tweets in Slack messages
     if (payload._enrichedTweets && Array.isArray(payload._enrichedTweets)) {
       const tweets = payload._enrichedTweets as Array<{
+        id?: string;
         author_username?: string;
         text: string;
       }>;
       return tweets
-        .map(
-          (t) =>
-            `  [Tweet by @${t.author_username || "unknown"}]: ${t.text.slice(0, 300)}`
-        )
+        .map((t) => {
+          const url = t.id && t.author_username
+            ? `\n  URL: https://x.com/${t.author_username}/status/${t.id}`
+            : "";
+          return `  [Tweet by @${t.author_username || "unknown"}]: ${t.text.slice(0, 300)}${url}`;
+        })
         .join("\n");
     }
 

@@ -5,15 +5,24 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "rippling",
-      "eventTypes": ["employee.*", "payroll.*", "timeoff.*"]
+      "eventTypes": [
+        "employee.*",
+        "payroll.*",
+        "timeoff.*"
+      ]
     },
     {
       "source": "quickbooks",
-      "eventTypes": ["*"]
+      "eventTypes": [
+        "*"
+      ]
     }
   ],
   "persona": {
@@ -38,10 +47,17 @@
       {
         "reportType": "daily-finance-pulse",
         "cadence": "daily",
-        "sections": ["burn-and-runway", "revenue-signals", "expense-alerts", "headcount-changes", "financial-health-summary"]
+        "sections": [
+          "burn-and-runway",
+          "revenue-signals",
+          "expense-alerts",
+          "headcount-changes",
+          "financial-health-summary"
+        ]
       }
     ]
   },
   "enabled": true,
-  "visibility": "exec"
+  "visibility": "exec",
+  "proposeTasks": true
 }

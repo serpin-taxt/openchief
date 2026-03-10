@@ -5,11 +5,18 @@
   "subscriptions": [
     {
       "source": "twitter",
-      "eventTypes": ["tweet.*", "mention.*", "search.*"]
+      "eventTypes": [
+        "tweet.*",
+        "mention.*",
+        "search.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     }
   ],
   "persona": {
@@ -36,10 +43,21 @@
       {
         "reportType": "daily-intelligence-brief",
         "cadence": "daily",
-        "sections": ["top-signals", "competitor-intel", "industry-trends", "market-context", "opportunities", "so-what"]
+        "sections": [
+          "top-signals",
+          "competitor-intel",
+          "industry-trends",
+          "market-context",
+          "opportunities",
+          "so-what"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "twitter_search"]
+  "tools": [
+    "query_events",
+    "twitter_search"
+  ],
+  "proposeTasks": true
 }
