@@ -42,11 +42,21 @@
       {
         "reportType": "daily-meeting",
         "cadence": "daily",
-        "sections": ["meeting-transcript", "strategic-alignment", "daily-priorities", "cross-functional-synergies", "action-items"]
+        "sections": [
+          "meeting-transcript",
+          "strategic-alignment",
+          "daily-priorities",
+          "cross-functional-synergies",
+          "action-items"
+        ]
       }
     ]
   },
-  "tools": ["query_events", "query_tasks"],
+  "tools": [
+    "query_events",
+    "query_tasks"
+  ],
   "enabled": true,
-  "visibility": "exec"
+  "visibility": "exec",
+  "proposeTasks": true
 }

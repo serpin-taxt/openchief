@@ -5,19 +5,30 @@
   "subscriptions": [
     {
       "source": "amplitude",
-      "eventTypes": ["metric.*"]
+      "eventTypes": [
+        "metric.*"
+      ]
     },
     {
       "source": "google-analytics",
-      "eventTypes": ["traffic.*", "conversion.*"]
+      "eventTypes": [
+        "traffic.*",
+        "conversion.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "discord",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     }
   ],
   "persona": {
@@ -58,5 +69,8 @@
     ]
   },
   "enabled": true,
-  "tools": ["query_events"]
+  "tools": [
+    "query_events"
+  ],
+  "proposeTasks": true
 }

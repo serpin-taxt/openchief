@@ -5,15 +5,25 @@
   "subscriptions": [
     {
       "source": "discord",
-      "eventTypes": ["message.*", "thread.*", "reaction.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*",
+        "reaction.*"
+      ]
     },
     {
       "source": "twitter",
-      "eventTypes": ["tweet.*", "mention.*"]
+      "eventTypes": [
+        "tweet.*",
+        "mention.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     }
   ],
   "persona": {
@@ -35,10 +45,20 @@
       {
         "reportType": "daily-community-pulse",
         "cadence": "daily",
-        "sections": ["engagement-summary", "sentiment-check", "hot-topics", "growth-signals", "external-mentions"]
+        "sections": [
+          "engagement-summary",
+          "sentiment-check",
+          "hot-topics",
+          "growth-signals",
+          "external-mentions"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "twitter_search"]
+  "tools": [
+    "query_events",
+    "twitter_search"
+  ],
+  "proposeTasks": true
 }

@@ -543,6 +543,42 @@ export function AgentDetail() {
         }}
       />
 
+      {/* Task Proposals Toggle */}
+      <section className="relative">
+        <div className="rounded-lg border border-border p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ListTodo className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Task Proposals
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={agent.proposeTasks !== false}
+              onClick={() => {
+                saveAgent({ ...agent, proposeTasks: agent.proposeTasks === false });
+              }}
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                agent.proposeTasks !== false ? "bg-primary" : "bg-input"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform",
+                  agent.proposeTasks !== false ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            When enabled, this agent can propose tasks during report generation for other agents to execute.
+          </p>
+        </div>
+      </section>
+
       {/* Strategy Cards — only for agents with strategy config (CEO) */}
       {agent.strategy && (
         <section className="relative">

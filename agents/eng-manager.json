@@ -5,23 +5,42 @@
   "subscriptions": [
     {
       "source": "github",
-      "eventTypes": ["pr.*", "commit.*", "build.*", "deploy.*", "release.*", "issue.*"]
+      "eventTypes": [
+        "pr.*",
+        "commit.*",
+        "build.*",
+        "deploy.*",
+        "release.*",
+        "issue.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "jira",
-      "eventTypes": ["issue.*", "sprint.*"]
+      "eventTypes": [
+        "issue.*",
+        "sprint.*"
+      ]
     },
     {
       "source": "jpd",
-      "eventTypes": ["idea.*", "insight.*"]
+      "eventTypes": [
+        "idea.*",
+        "insight.*"
+      ]
     },
     {
       "source": "jsm",
-      "eventTypes": ["request.breached", "request.resolved"]
+      "eventTypes": [
+        "request.breached",
+        "request.resolved"
+      ]
     }
   ],
   "persona": {
@@ -43,10 +62,21 @@
       {
         "reportType": "daily-standup",
         "cadence": "daily",
-        "sections": ["shipping-velocity", "pr-review-status", "build-health", "blockers-and-risks", "team-workload"]
+        "sections": [
+          "shipping-velocity",
+          "pr-review-status",
+          "build-health",
+          "blockers-and-risks",
+          "team-workload"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "github_file", "github_search"]
+  "tools": [
+    "query_events",
+    "github_file",
+    "github_search"
+  ],
+  "proposeTasks": true
 }

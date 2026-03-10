@@ -5,23 +5,37 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "twitter",
-      "eventTypes": ["tweet.*", "mention.*", "search.*"]
+      "eventTypes": [
+        "tweet.*",
+        "mention.*",
+        "search.*"
+      ]
     },
     {
       "source": "googleanalytics",
-      "eventTypes": ["report.*"]
+      "eventTypes": [
+        "report.*"
+      ]
     },
     {
       "source": "amplitude",
-      "eventTypes": ["report.*", "metric.*"]
+      "eventTypes": [
+        "report.*",
+        "metric.*"
+      ]
     },
     {
       "source": "jsm",
-      "eventTypes": ["csat.*"]
+      "eventTypes": [
+        "csat.*"
+      ]
     }
   ],
   "persona": {
@@ -47,11 +61,22 @@
       {
         "reportType": "daily-revenue-pulse",
         "cadence": "daily",
-        "sections": ["funnel-overview", "traffic-performance", "engagement-metrics", "revenue-signals", "competitive-intel", "growth-score"]
+        "sections": [
+          "funnel-overview",
+          "traffic-performance",
+          "engagement-metrics",
+          "revenue-signals",
+          "competitive-intel",
+          "growth-score"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "twitter_search"],
-  "visibility": "exec"
+  "tools": [
+    "query_events",
+    "twitter_search"
+  ],
+  "visibility": "exec",
+  "proposeTasks": true
 }

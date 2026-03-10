@@ -5,11 +5,21 @@
   "subscriptions": [
     {
       "source": "github",
-      "eventTypes": ["pr.*", "commit.*", "build.*", "deploy.*", "release.*", "issue.*"]
+      "eventTypes": [
+        "pr.*",
+        "commit.*",
+        "build.*",
+        "deploy.*",
+        "release.*",
+        "issue.*"
+      ]
     },
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     }
   ],
   "persona": {
@@ -35,11 +45,23 @@
       {
         "reportType": "daily-security-brief",
         "cadence": "daily",
-        "sections": ["critical-alerts", "vulnerability-status", "secrets-audit", "cicd-changes", "threat-intel", "security-posture"]
+        "sections": [
+          "critical-alerts",
+          "vulnerability-status",
+          "secrets-audit",
+          "cicd-changes",
+          "threat-intel",
+          "security-posture"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events", "github_file", "github_search"],
-  "visibility": "exec"
+  "tools": [
+    "query_events",
+    "github_file",
+    "github_search"
+  ],
+  "visibility": "exec",
+  "proposeTasks": true
 }

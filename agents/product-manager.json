@@ -5,39 +5,69 @@
   "subscriptions": [
     {
       "source": "slack",
-      "eventTypes": ["message.*", "thread.*"]
+      "eventTypes": [
+        "message.*",
+        "thread.*"
+      ]
     },
     {
       "source": "github",
-      "eventTypes": ["pr.merged", "pr.opened", "issue.*", "release.*", "deploy.*"]
+      "eventTypes": [
+        "pr.merged",
+        "pr.opened",
+        "issue.*",
+        "release.*",
+        "deploy.*"
+      ]
     },
     {
       "source": "intercom",
-      "eventTypes": ["conversation.*", "ticket.*"]
+      "eventTypes": [
+        "conversation.*",
+        "ticket.*"
+      ]
     },
     {
       "source": "discord",
-      "eventTypes": ["message.*"]
+      "eventTypes": [
+        "message.*"
+      ]
     },
     {
       "source": "amplitude",
-      "eventTypes": ["report.*", "metric.*"]
+      "eventTypes": [
+        "report.*",
+        "metric.*"
+      ]
     },
     {
       "source": "notion",
-      "eventTypes": ["page.*", "database.*"]
+      "eventTypes": [
+        "page.*",
+        "database.*"
+      ]
     },
     {
       "source": "jira",
-      "eventTypes": ["issue.*", "sprint.*"]
+      "eventTypes": [
+        "issue.*",
+        "sprint.*"
+      ]
     },
     {
       "source": "jpd",
-      "eventTypes": ["idea.*", "insight.*"]
+      "eventTypes": [
+        "idea.*",
+        "insight.*"
+      ]
     },
     {
       "source": "jsm",
-      "eventTypes": ["request.created", "request.resolved", "csat.*"]
+      "eventTypes": [
+        "request.created",
+        "request.resolved",
+        "csat.*"
+      ]
     }
   ],
   "persona": {
@@ -59,10 +89,18 @@
       {
         "reportType": "daily-product-pulse",
         "cadence": "daily",
-        "sections": ["customer-feedback", "shipping-progress", "product-signals", "internal-alignment"]
+        "sections": [
+          "customer-feedback",
+          "shipping-progress",
+          "product-signals",
+          "internal-alignment"
+        ]
       }
     ]
   },
   "enabled": true,
-  "tools": ["query_events"]
+  "tools": [
+    "query_events"
+  ],
+  "proposeTasks": true
 }

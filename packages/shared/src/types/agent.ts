@@ -45,6 +45,9 @@ export interface AgentDefinition {
 
   /** Report schedule time in local timezone, HH:MM format (e.g. "08:00", "09:30"). Uses REPORT_TIMEZONE. */
   scheduleTime?: string;
+
+  /** Whether this agent proposes tasks during report generation. Defaults to true. */
+  proposeTasks?: boolean;
 }
 
 export interface EventSubscription {
