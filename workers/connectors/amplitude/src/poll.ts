@@ -15,11 +15,13 @@ import {
   getActiveUsers,
   getUserComposition,
   getRetention,
+  getChart,
 } from "./amplitude-api";
 import {
   normalizeMetric,
   normalizeComposition,
   normalizeRetention,
+  normalizeChart,
 } from "./normalize";
 import type { OpenChiefEvent } from "@openchief/shared";
 
@@ -60,6 +62,11 @@ export async function runPollTasks(env: Env): Promise<PollResult> {
 
   // --- 1. Active Users: DAU / WAU / MAU --------------------------------------
   try {
+    // Amplitude's i=7 and i=30 return CALENDAR-ALIGNED buckets (Mon-Sun weeks,
+    // calendar months), not rolling windows. The last bucket is always a partial
+    // period (Week-to-Date or Month-to-Date). We use wider ranges to ensure 3+
+    // buckets, then take series[length-2] = last COMPLETE period as the current
+    // value and series[length-3] as the previous period for comparison.
     const [dauResult, wauResult, mauResult] = await Promise.all([
       getActiveUsers(
         env.AMPLITUDE_API_KEY,
@@ -71,20 +78,20 @@ export async function runPollTasks(env: Env): Promise<PollResult> {
       getActiveUsers(
         env.AMPLITUDE_API_KEY,
         env.AMPLITUDE_SECRET_KEY,
-        formatDate(new Date(today.getTime() - 14 * 86400_000)),
+        formatDate(new Date(today.getTime() - 28 * 86400_000)),
         formatDate(yesterday),
         "7"
       ),
       getActiveUsers(
         env.AMPLITUDE_API_KEY,
         env.AMPLITUDE_SECRET_KEY,
-        formatDate(sixtyDaysAgo),
+        formatDate(new Date(today.getTime() - 120 * 86400_000)),
         formatDate(yesterday),
         "30"
       ),
     ]);
 
-    // DAU
+    // DAU — daily buckets are always complete, use the last one
     if (dauResult.data?.series?.length >= 1) {
       const series = dauResult.data.series[0];
       const current = series[series.length - 1] || 0;
@@ -103,11 +110,13 @@ export async function runPollTasks(env: Env): Promise<PollResult> {
       );
     }
 
-    // WAU
+    // WAU — skip last bucket (partial week), use second-to-last (last complete week)
     if (wauResult.data?.series?.length >= 1) {
       const series = wauResult.data.series[0];
-      const current = series[series.length - 1] || 0;
-      const prev = series.length >= 2 ? series[series.length - 2] : undefined;
+      const current = series.length >= 2
+        ? series[series.length - 2] || 0
+        : series[series.length - 1] || 0;
+      const prev = series.length >= 3 ? series[series.length - 3] : undefined;
       allEvents.push(
         normalizeMetric(
           {
@@ -122,11 +131,13 @@ export async function runPollTasks(env: Env): Promise<PollResult> {
       );
     }
 
-    // MAU
+    // MAU — skip last bucket (partial month), use second-to-last (last complete month)
     if (mauResult.data?.series?.length >= 1) {
       const series = mauResult.data.series[0];
-      const current = series[series.length - 1] || 0;
-      const prev = series.length >= 2 ? series[series.length - 2] : undefined;
+      const current = series.length >= 2
+        ? series[series.length - 2] || 0
+        : series[series.length - 1] || 0;
+      const prev = series.length >= 3 ? series[series.length - 3] : undefined;
       allEvents.push(
         normalizeMetric(
           {
@@ -274,6 +285,49 @@ export async function runPollTasks(env: Env): Promise<PollResult> {
     }
   } catch (err) {
     const msg = `Retention: ${err instanceof Error ? err.message : err}`;
+    console.error(msg);
+    errors.push(msg);
+  }
+
+  // --- 4. Saved Charts (user-configured) --------------------------------------
+
+  try {
+    const chartsRaw = await env.KV.get("amplitude:config:charts");
+    const charts: Array<{ id: string; label: string }> = chartsRaw
+      ? JSON.parse(chartsRaw)
+      : [];
+
+    for (const chart of charts) {
+      try {
+        const result = await getChart(
+          env.AMPLITUDE_API_KEY,
+          env.AMPLITUDE_SECRET_KEY,
+          chart.id,
+        );
+
+        allEvents.push(
+          normalizeChart(
+            {
+              chartId: chart.id,
+              chartLabel: chart.label,
+              data: result.data ?? {},
+              date: formatDateHyphen(yesterday),
+            },
+            projectName,
+          ),
+        );
+
+        console.log(`Chart fetched: ${chart.label} (${chart.id})`);
+      } catch (err) {
+        const msg = `Chart ${chart.label} (${chart.id}): ${
+          err instanceof Error ? err.message : err
+        }`;
+        console.error(msg);
+        errors.push(msg);
+      }
+    }
+  } catch (err) {
+    const msg = `Charts config: ${err instanceof Error ? err.message : err}`;
     console.error(msg);
     errors.push(msg);
   }

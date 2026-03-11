@@ -878,6 +878,20 @@ export default {
         if (method === "PUT") return handleUpdateConnectionSearchQueries(request, env, source);
       }
 
+      // /api/connections/:source/charts  (list + save configured charts)
+      const connChartsMatch = path.match(/^\/api\/connections\/([^/]+)\/charts$/);
+      if (connChartsMatch) {
+        const source = decodeURIComponent(connChartsMatch[1]);
+        if (method === "GET") return handleProxyGet(env, source, "/charts");
+        if (method === "PUT") return handleProxyPut(request, env, source, "/charts");
+      }
+
+      const connChartsValidateMatch = path.match(/^\/api\/connections\/([^/]+)\/charts\/validate$/);
+      if (connChartsValidateMatch && method === "POST") {
+        const source = decodeURIComponent(connChartsValidateMatch[1]);
+        return handleProxyPost(request, env, source, "/charts/validate");
+      }
+
       // /api/connections/:source/oauth/status  (check OAuth token status)
       const connOAuthStatusMatch = path.match(/^\/api\/connections\/([^/]+)\/oauth\/status$/);
       if (connOAuthStatusMatch && method === "GET") {
@@ -2564,6 +2578,56 @@ async function handleProxyPut(
     const body = await request.text();
     const resp = await binding.fetch(`https://connector${path}`, {
       method: "PUT",
+      headers: {
+        Authorization: `Bearer ${adminSecret}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    const respBody = await resp.text();
+    if (!resp.ok) {
+      return json(
+        { ok: false, error: `Connector returned ${resp.status}`, detail: respBody },
+        resp.status,
+      );
+    }
+    return new Response(respBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to reach connector";
+    return json({ ok: false, error: msg }, 502);
+  }
+}
+
+async function handleProxyPost(
+  request: Request,
+  env: Env,
+  source: string,
+  path: string,
+): Promise<Response> {
+  const cfg = CONNECTOR_CONFIGS[source];
+  if (!cfg) return errorJson("Unknown connector", 404);
+
+  const adminSecret = await env.KV.get(`connector-secret:${source}:ADMIN_SECRET`);
+  if (!adminSecret) {
+    return errorJson(
+      "ADMIN_SECRET not configured. Set it in the connector settings first.",
+      400,
+    );
+  }
+
+  const bindingKey = connectorBindingName(source);
+  const binding = env[bindingKey];
+  if (!binding) {
+    return errorJson(`Service binding "${bindingKey}" not configured`, 500);
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await binding.fetch(`https://connector${path}`, {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${adminSecret}`,
         "Content-Type": "application/json",

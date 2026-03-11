@@ -23,6 +23,7 @@ import {
   Plus,
   Trash2,
   ExternalLink,
+  BarChart3,
 } from "lucide-react";
 import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 import {
@@ -38,6 +39,8 @@ import {
   type TwitterAccount,
   type TwitterAccountsResponse,
   type TwitterSearchQueriesResponse,
+  type AmplitudeChartsResponse,
+  type AmplitudeChartConfig,
 } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1958,6 +1961,303 @@ function SearchQueriesSection({ source }: { source: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Saved Charts (Amplitude)
+// ---------------------------------------------------------------------------
+
+/** Extract a chart ID from an Amplitude URL or return the raw input as-is. */
+function extractChartId(input: string): string {
+  const trimmed = input.trim();
+  // Match patterns like:
+  //   https://analytics.amplitude.com/org/chart/abc123
+  //   https://app.amplitude.com/analytics/org/chart/abc123
+  //   amplitude.com/.../chart/abc123/...
+  const urlMatch = trimmed.match(/chart\/([a-zA-Z0-9]+)/);
+  if (urlMatch) return urlMatch[1];
+  return trimmed;
+}
+
+function ChartPickerSection({ source }: { source: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [charts, setCharts] = useState<AmplitudeChartConfig[]>([]);
+  const [input, setInput] = useState("");
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [newLabel, setNewLabel] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const loadCharts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get<AmplitudeChartsResponse>(
+        `connections/${source}/charts`,
+      );
+      if (data.ok) {
+        setCharts(data.charts);
+      } else {
+        setError(data.error ?? "Failed to load charts");
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load charts",
+      );
+    } finally {
+      setLoading(false);
+      setLoaded(true);
+    }
+  }, [source]);
+
+  useEffect(() => {
+    if (expanded && !loaded && !loading) {
+      loadCharts();
+    }
+  }, [expanded, loaded, loading, loadCharts]);
+
+  // When input changes, extract chart ID and clear previous validation
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    setAddError(null);
+    setResolvedId(null);
+    setNewLabel("");
+  };
+
+  const validateAndAdd = async () => {
+    const chartId = extractChartId(input);
+    if (!chartId) return;
+    if (charts.some((c) => c.id === chartId)) {
+      setAddError("This chart is already added");
+      return;
+    }
+
+    setValidating(true);
+    setAddError(null);
+    try {
+      const resp = await api.post<{ ok: boolean; chartId?: string; error?: string }>(
+        `connections/${source}/charts/validate`,
+        { id: chartId },
+      );
+      if (resp.ok) {
+        setResolvedId(chartId);
+      } else {
+        setAddError(resp.error ?? "Chart not found — check the ID and try again");
+      }
+    } catch (err) {
+      setAddError(
+        err instanceof Error ? err.message : "Failed to validate chart",
+      );
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const persistCharts = async (updated: AmplitudeChartConfig[]) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.put(`connections/${source}/charts`, { charts: updated });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save charts",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmAdd = async () => {
+    if (!resolvedId) return;
+    const label = newLabel.trim();
+    if (!label) return;
+    const updated = [...charts, { id: resolvedId, label }];
+    setCharts(updated);
+    setInput("");
+    setResolvedId(null);
+    setNewLabel("");
+    await persistCharts(updated);
+  };
+
+  const removeChart = async (chartId: string) => {
+    const updated = charts.filter((c) => c.id !== chartId);
+    setCharts(updated);
+    await persistCharts(updated);
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer select-none"
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <div className="flex items-center gap-2">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+          <BarChart3 className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <CardTitle className="text-base">Saved Charts</CardTitle>
+            <CardDescription>
+              {charts.length > 0
+                ? `${charts.length} chart${charts.length === 1 ? "" : "s"} configured`
+                : "Pull data from saved Amplitude charts into agent reports"}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Loading charts...
+              </span>
+            </div>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : (
+            <>
+              {/* Step 1: Paste URL or chart ID */}
+              {!resolvedId ? (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={input}
+                      onChange={(e) => handleInputChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && input.trim()) validateAndAdd();
+                      }}
+                      placeholder="Paste Amplitude chart URL or chart ID"
+                      className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={validateAndAdd}
+                      disabled={!input.trim() || validating}
+                    >
+                      {validating ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                          Add
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  {addError && (
+                    <p className="text-xs text-destructive">{addError}</p>
+                  )}
+                </div>
+              ) : (
+                /* Step 2: Chart validated — enter a label */
+                <div className="space-y-2 rounded-md border border-green-500/30 bg-green-500/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                    <span className="text-sm">
+                      Chart{" "}
+                      <code className="bg-muted px-1.5 py-0.5 rounded text-xs">
+                        {resolvedId}
+                      </code>{" "}
+                      verified
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newLabel.trim()) confirmAdd();
+                      }}
+                      placeholder="Give it a label (e.g. Weekly Signups)"
+                      className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
+                      autoFocus
+                    />
+                    <Button
+                      size="sm"
+                      onClick={confirmAdd}
+                      disabled={!newLabel.trim()}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                      Confirm
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setResolvedId(null);
+                        setNewLabel("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Chart list */}
+              {charts.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No charts configured. Paste a chart URL from your Amplitude
+                  dashboard to include its data in agent reports.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {charts.map((chart) => (
+                    <div
+                      key={chart.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium truncate">
+                          {chart.label}
+                        </span>
+                        <code className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                          {chart.id}
+                        </code>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        onClick={() => removeChart(chart.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Help text + save status */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Paste a full Amplitude chart URL or just the chart ID.
+                  Chart data is fetched every 6 hours during polling.
+                </p>
+                {saving && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving...
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ConnectionDetail
 // ---------------------------------------------------------------------------
 
@@ -2175,6 +2475,11 @@ export function ConnectionDetail() {
       {/* Search Queries (Twitter only) */}
       {source === "twitter" && adminSecretConfigured && (
         <SearchQueriesSection source={source} />
+      )}
+
+      {/* Saved Charts (Amplitude only) */}
+      {source === "amplitude" && adminSecretConfigured && (
+        <ChartPickerSection source={source} />
       )}
 
       {/* Recent Events */}

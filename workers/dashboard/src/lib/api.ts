@@ -166,6 +166,17 @@ export interface TwitterSearchQueriesResponse {
   error?: string;
 }
 
+export interface AmplitudeChartConfig {
+  id: string;
+  label: string;
+}
+
+export interface AmplitudeChartsResponse {
+  ok: boolean;
+  charts: AmplitudeChartConfig[];
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
 // API helper
 // ---------------------------------------------------------------------------
