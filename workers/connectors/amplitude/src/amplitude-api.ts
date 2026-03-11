@@ -247,3 +247,36 @@ export async function getRevenue(
     { start, end }
   );
 }
+
+// --- Saved Chart Results -----------------------------------------------------
+
+export interface AmplitudeChartResult {
+  data: Record<string, unknown>;
+}
+
+/**
+ * Fetch results from a saved Amplitude chart by chart ID.
+ * Uses the v3 Chart API (not v2 like other endpoints).
+ * Returns whatever data the chart was saved with — response shape varies by chart type.
+ */
+export async function getChart(
+  apiKey: string,
+  secretKey: string,
+  chartId: string
+): Promise<AmplitudeChartResult> {
+  const url = `https://amplitude.com/api/3/chart/${chartId}/query`;
+  const auth = btoa(`${apiKey}:${secretKey}`);
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Amplitude Chart API ${res.status}: ${text}`);
+  }
+
+  return res.json() as Promise<AmplitudeChartResult>;
+}
