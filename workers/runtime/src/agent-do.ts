@@ -17,7 +17,7 @@ import { buildTaskExecutionPrompt } from "./task-prompt";
 import { getAgentTools, executeTool } from "./agent-tools";
 import type { ToolDefinition } from "./agent-tools";
 import { retrieveContext, indexReport } from "./rag";
-import { postReportToSlack, postTaskProposalToSlack } from "./slack-post";
+import { postReportToSlack, postTaskProposalToSlack, postTaskCompletionToSlack } from "./slack-post";
 
 // ---------------------------------------------------------------------------
 // Staggered report schedule
@@ -1675,6 +1675,32 @@ export class AgentDurableObject extends DurableObject<Env> {
       console.log(
         `Task completed: "${task.title}" by ${config.id} (${tokensUsed} tokens)`
       );
+
+      // Post task completion to Slack (non-blocking)
+      if (config.slackChannelId) {
+        this.ctx.waitUntil(
+          (async () => {
+            try {
+              const slackToken = await this.env.KV.get("connector-secret:slack:SLACK_BOT_TOKEN");
+              if (!slackToken) return;
+              await postTaskCompletionToSlack(
+                slackToken,
+                config.slackChannelId!,
+                {
+                  title: task.title,
+                  startedAt: now,
+                  completedAt,
+                  tokensUsed,
+                },
+                output,
+                config.name
+              );
+            } catch (err) {
+              console.error("Failed to post task completion to Slack:", err);
+            }
+          })()
+        );
+      }
     } catch (err) {
       console.error(`Task execution failed for "${task.title}":`, err);
       // Revert to queued so it can be retried next hour

@@ -18,6 +18,7 @@ export interface PollEnv {
   JSM_API_EMAIL: string;
   JSM_INSTANCE_URL: string;
   JSM_PROJECTS?: string; // comma-separated project keys
+  JSM_EVENT_TYPES?: string; // comma-separated: "requests,transitions,comments,sla,csat" (all if unset)
   POLL_CURSOR: KVNamespace;
 }
 
@@ -48,7 +49,8 @@ export async function runPoll(env: PollEnv): Promise<PollResult> {
 
   console.log(`Polling JSM since ${since}`);
 
-  const result = await pollRequests(client, env, since);
+  const enabledTypes = parseEventTypes(env.JSM_EVENT_TYPES);
+  const result = await pollRequests(client, env, since, enabledTypes);
 
   // Update cursor
   await env.POLL_CURSOR.put(CURSOR_KEY, now);
@@ -68,6 +70,7 @@ async function pollRequests(
   client: JsmClient,
   env: PollEnv,
   since: string,
+  enabledTypes: Set<string>,
 ): Promise<PollResult> {
   const {
     normalizeRequest,
@@ -77,8 +80,11 @@ async function pollRequests(
     normalizeCSAT,
   } = await import("./normalize");
 
-  // Build JQL: service desk issue types updated since last poll
-  const sinceDate = since.slice(0, 16).replace("T", " ");
+  // Build JQL: service desk issue types updated since last poll.
+  // Subtract 12h overlap because Jira JQL interprets dates in the user's
+  // timezone, but our cursor is stored as UTC. Router deduplicates via ULID.
+  const sinceMs = new Date(since).getTime() - 12 * 60 * 60 * 1000;
+  const sinceDate = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
   const projects = parseProjects(env.JSM_PROJECTS);
 
   // JSM request types typically include "Service Request", "[System] Service request",
@@ -98,33 +104,41 @@ async function pollRequests(
   const maxPages = 10;
 
   // Load known SLA breaches from KV to avoid re-emitting
-  const knownBreaches = await loadKnownBreaches(env.POLL_CURSOR);
+  const knownBreaches = enabledTypes.has("sla")
+    ? await loadKnownBreaches(env.POLL_CURSOR)
+    : new Set<string>();
 
   for (let page = 0; page < maxPages; page++) {
     const result = await client.searchRequests(jql, { startAt, maxResults: 50 });
 
     for (const request of result.issues) {
       // Emit request created/updated event
-      const requestEvent = normalizeRequest(request, since);
-      await env.EVENTS_QUEUE.send(requestEvent);
-      requestCount++;
+      if (enabledTypes.has("requests")) {
+        const requestEvent = normalizeRequest(request, since);
+        await env.EVENTS_QUEUE.send(requestEvent);
+        requestCount++;
+      }
 
       // Emit transition events from changelog
-      const transitions = normalizeTransitions(request, since);
-      for (const t of transitions) {
-        await env.EVENTS_QUEUE.send(t);
-        transitionCount++;
+      if (enabledTypes.has("transitions")) {
+        const transitions = normalizeTransitions(request, since);
+        for (const t of transitions) {
+          await env.EVENTS_QUEUE.send(t);
+          transitionCount++;
+        }
       }
 
       // Emit comment events
-      const comments = normalizeComments(request, since);
-      for (const c of comments) {
-        await env.EVENTS_QUEUE.send(c);
-        commentCount++;
+      if (enabledTypes.has("comments")) {
+        const comments = normalizeComments(request, since);
+        for (const c of comments) {
+          await env.EVENTS_QUEUE.send(c);
+          commentCount++;
+        }
       }
 
       // Check SLA breaches (rate-limited — only for active/open requests)
-      if (request.fields.status.statusCategory?.key !== "done") {
+      if (enabledTypes.has("sla") && request.fields.status.statusCategory?.key !== "done") {
         try {
           const slaRecords = await client.getRequestSLAs(request.key);
           const breachEvents = normalizeSLABreach(request, slaRecords, knownBreaches);
@@ -142,7 +156,7 @@ async function pollRequests(
       }
 
       // Check CSAT for resolved requests
-      if (request.fields.resolution) {
+      if (enabledTypes.has("csat") && request.fields.resolution) {
         try {
           const feedback = await client.getCSATFeedback(request.key);
           if (feedback) {
@@ -197,13 +211,24 @@ export async function runBackfill(
   );
 
   console.log(`Backfilling JSM for ${days} days (since ${since})`);
-  const result = await pollRequests(client, env, since);
+  const enabledTypes = parseEventTypes(env.JSM_EVENT_TYPES);
+  const result = await pollRequests(client, env, since, enabledTypes);
 
   await env.POLL_CURSOR.put(CURSOR_KEY, new Date().toISOString());
   return result;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const ALL_EVENT_TYPES = new Set(["requests", "transitions", "comments", "sla", "csat"]);
+
+function parseEventTypes(typesStr?: string): Set<string> {
+  if (!typesStr) return ALL_EVENT_TYPES;
+  const parsed = new Set(
+    typesStr.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+  );
+  return parsed.size > 0 ? parsed : ALL_EVENT_TYPES;
+}
 
 function parseProjects(projectsStr?: string): string[] {
   if (!projectsStr) return [];

@@ -363,3 +363,180 @@ export async function postTaskProposalToSlack(
     console.error(`Slack task proposal post error: ${result.error}`);
   }
 }
+
+/**
+ * Split markdown content into logical sections for Slack thread replies.
+ * Groups content by markdown headers, keeping each section manageable.
+ * Falls back to paragraph splitting if no headers found.
+ */
+function splitContentSections(content: string): string[] {
+  const converted = markdownToSlackMrkdwn(content);
+  const sections: string[] = [];
+
+  // Try splitting by markdown headers (now *bold lines* after conversion)
+  // Match lines that are standalone bold text (converted from # headers)
+  const lines = converted.split("\n");
+  let current = "";
+
+  for (const line of lines) {
+    // Detect section boundaries: bold-only lines that were headers
+    const isSectionHeader = /^\*[^*]+\*$/.test(line.trim()) && current.trim().length > 0;
+
+    if (isSectionHeader) {
+      if (current.trim()) {
+        sections.push(current.trim());
+      }
+      current = line;
+    } else {
+      current += (current ? "\n" : "") + line;
+    }
+  }
+  if (current.trim()) {
+    sections.push(current.trim());
+  }
+
+  // If we only got one big section (no headers), split by double-newlines
+  if (sections.length <= 1 && converted.length > MAX_BLOCK_TEXT) {
+    const paragraphs = converted.split("\n\n").filter((p) => p.trim());
+    // Group small paragraphs together, split large ones
+    const grouped: string[] = [];
+    let chunk = "";
+    for (const para of paragraphs) {
+      const candidate = chunk ? `${chunk}\n\n${para}` : para;
+      if (candidate.length > MAX_BLOCK_TEXT && chunk) {
+        grouped.push(chunk.trim());
+        chunk = para;
+      } else {
+        chunk = candidate;
+      }
+    }
+    if (chunk.trim()) grouped.push(chunk.trim());
+    return grouped;
+  }
+
+  // Further split any sections that exceed the block limit
+  const result: string[] = [];
+  for (const section of sections) {
+    if (section.length <= MAX_BLOCK_TEXT) {
+      result.push(section);
+    } else {
+      // Split oversized section at paragraph boundaries
+      const paras = section.split("\n\n");
+      let chunk = "";
+      for (const para of paras) {
+        const candidate = chunk ? `${chunk}\n\n${para}` : para;
+        if (candidate.length > MAX_BLOCK_TEXT && chunk) {
+          result.push(chunk.trim());
+          chunk = para.length > MAX_BLOCK_TEXT ? para.slice(0, MAX_BLOCK_TEXT) : para;
+        } else if (candidate.length > MAX_BLOCK_TEXT) {
+          result.push(para.slice(0, MAX_BLOCK_TEXT));
+          chunk = "";
+        } else {
+          chunk = candidate;
+        }
+      }
+      if (chunk.trim()) result.push(chunk.trim());
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Post a task completion notification to Slack.
+ * Parent message: structured block-kit with summary + metadata.
+ * Thread replies: content split by section, one message per section.
+ */
+export async function postTaskCompletionToSlack(
+  token: string,
+  channelId: string,
+  task: {
+    title: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    tokensUsed: number;
+  },
+  output: {
+    summary: string;
+    content: string;
+    artifacts: Array<{ name: string; type: string; content: string }>;
+  },
+  agentName: string,
+): Promise<void> {
+  // Calculate duration if both timestamps exist
+  let durationStr = "";
+  if (task.startedAt && task.completedAt) {
+    const durationMs =
+      new Date(task.completedAt).getTime() -
+      new Date(task.startedAt).getTime();
+    const minutes = Math.round(durationMs / 60000);
+    durationStr = minutes < 1 ? "< 1 min" : `${minutes} min`;
+  }
+
+  const metaParts = [`Completed by *${agentName}*`];
+  if (durationStr) metaParts.push(durationStr);
+  if (task.tokensUsed > 0) metaParts.push(`${task.tokensUsed.toLocaleString()} tokens`);
+
+  // Build block-kit parent message (structured like task proposals)
+  const fallbackText = `:white_check_mark: Task Completed: ${task.title} — ${output.summary}`;
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `:white_check_mark: *Task Completed*\n*${task.title}*`,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: markdownToSlackMrkdwn(output.summary).slice(0, MAX_BLOCK_TEXT),
+      },
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: metaParts.join(" · "),
+        },
+      ],
+    },
+  ];
+
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ channel: channelId, text: fallbackText, blocks }),
+  });
+
+  const parent = (await response.json()) as {
+    ok: boolean;
+    ts?: string;
+    error?: string;
+  };
+  if (!parent.ok || !parent.ts) {
+    console.error(`Failed to post task completion to Slack: ${parent.error}`);
+    return;
+  }
+
+  // Post content as threaded replies, split by section
+  if (output.content && output.content.length > 0) {
+    const sections = splitContentSections(output.content);
+    for (const section of sections) {
+      if (section.trim()) {
+        await postToSlack(token, channelId, section, parent.ts);
+      }
+    }
+  }
+
+  // Post each artifact as a separate thread reply
+  for (const artifact of output.artifacts) {
+    const artifactText = `:page_facing_up: *${artifact.name}* (${artifact.type})\n\`\`\`\n${artifact.content.slice(0, MAX_BLOCK_TEXT)}\n\`\`\``;
+    await postToSlack(token, channelId, artifactText, parent.ts);
+  }
+}

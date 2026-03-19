@@ -75,6 +75,9 @@ export interface ConnectorConfigField {
   configured: boolean;
   maskedValue: string | null;
   updatedAt: string | null;
+  type?: "multiselect";
+  options?: Array<{ value: string; label: string }>;
+  category?: "credential" | "subscription";
 }
 
 export interface ConnectorConfigResponse {

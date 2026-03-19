@@ -24,6 +24,7 @@ import {
   Trash2,
   ExternalLink,
   BarChart3,
+  SlidersHorizontal,
 } from "lucide-react";
 import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 import {
@@ -710,6 +711,26 @@ function SetupGuideContent({ guide }: { guide: SetupGuideData }) {
   );
 }
 
+function SaveButton({ hasChanges, saving, onSave }: { hasChanges: boolean; saving: boolean; onSave: () => void }) {
+  return (
+    <div className="flex justify-end pt-2">
+      <Button onClick={onSave} disabled={!hasChanges || saving} size="sm">
+        {saving ? (
+          <>
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            Saving...
+          </>
+        ) : (
+          <>
+            <Save className="mr-1.5 h-3.5 w-3.5" />
+            Save Settings
+          </>
+        )}
+      </Button>
+    </div>
+  );
+}
+
 function ConfigurationSection({
   source,
   config,
@@ -731,71 +752,89 @@ function ConfigurationSection({
   onToggleReveal: (key: string) => void;
   onSave: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [credExpanded, setCredExpanded] = useState(false);
+  const [subExpanded, setSubExpanded] = useState(false);
   const guide = SETUP_GUIDES[source] ?? null;
 
-  return (
-    <Card>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between px-6 py-4 text-left"
-      >
-        <div className="flex items-center gap-2">
-          <Settings className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Configuration</span>
-          <span className="text-xs text-muted-foreground">
-            {guide ? "Setup guide, credentials & settings" : "Manage connection credentials and settings"}
-          </span>
-        </div>
-        <ChevronDown
-          className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
-        />
-      </button>
-      {expanded && (
-        <CardContent className="space-y-6 pt-0">
-          {/* Setup Guide (if available for this source) */}
-          {guide && (
-            <>
-              <SetupGuideContent guide={guide} />
-              <Separator />
-            </>
-          )}
+  const credentialFields = config.fields.filter((f) => f.category !== "subscription");
+  const subscriptionFields = config.fields.filter((f) => f.category === "subscription");
 
-          {/* Credential Fields */}
-          <div className="space-y-4">
-            {config.fields.map((field) => (
-              <FieldRow
-                key={field.key}
-                field={field}
-                value={fieldValues[field.key] ?? ""}
-                revealed={revealedFields.has(field.key)}
-                onValueChange={(v) => onFieldChange(field.key, v)}
-                onToggleReveal={() => onToggleReveal(field.key)}
-              />
-            ))}
-            <div className="flex justify-end pt-2">
-              <Button
-                onClick={onSave}
-                disabled={!hasChanges || saving}
-                size="sm"
-              >
-                {saving ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-1.5 h-3.5 w-3.5" />
-                    Save Settings
-                  </>
-                )}
-              </Button>
-            </div>
+  const renderFields = (fields: typeof config.fields) =>
+    fields.map((field) => (
+      <FieldRow
+        key={field.key}
+        field={field}
+        value={fieldValues[field.key] ?? ""}
+        revealed={revealedFields.has(field.key)}
+        onValueChange={(v) => onFieldChange(field.key, v)}
+        onToggleReveal={() => onToggleReveal(field.key)}
+      />
+    ));
+
+  return (
+    <>
+      {/* Connection Credentials */}
+      <Card>
+        <button
+          onClick={() => setCredExpanded(!credExpanded)}
+          className="flex w-full items-center justify-between px-6 py-4 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Connection</span>
+            <span className="text-xs text-muted-foreground">
+              {guide ? "Setup guide & credentials" : "Manage connection credentials"}
+            </span>
           </div>
-        </CardContent>
+          <ChevronDown
+            className={`h-4 w-4 text-muted-foreground transition-transform ${credExpanded ? "rotate-180" : ""}`}
+          />
+        </button>
+        {credExpanded && (
+          <CardContent className="space-y-6 pt-0">
+            {guide && (
+              <>
+                <SetupGuideContent guide={guide} />
+                <Separator />
+              </>
+            )}
+            <div className="space-y-4">
+              {renderFields(credentialFields)}
+              <SaveButton hasChanges={hasChanges} saving={saving} onSave={onSave} />
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Subscription Settings (only if this connector has subscription fields) */}
+      {subscriptionFields.length > 0 && (
+        <Card>
+          <button
+            onClick={() => setSubExpanded(!subExpanded)}
+            className="flex w-full items-center justify-between px-6 py-4 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Subscription</span>
+              <span className="text-xs text-muted-foreground">
+                Configure which data to ingest
+              </span>
+            </div>
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground transition-transform ${subExpanded ? "rotate-180" : ""}`}
+            />
+          </button>
+          {subExpanded && (
+            <CardContent className="space-y-6 pt-0">
+              <div className="space-y-4">
+                {renderFields(subscriptionFields)}
+                <SaveButton hasChanges={hasChanges} saving={saving} onSave={onSave} />
+              </div>
+            </CardContent>
+          )}
+        </Card>
       )}
-    </Card>
+    </>
   );
 }
 
@@ -2577,6 +2616,29 @@ function FieldRow({
 }) {
   const showMasked = field.secret && field.configured && !value && !revealed;
   const isMultiline = field.key.includes("private_key") || field.key.includes("pem");
+  const isMultiselect = field.type === "multiselect" && field.options;
+
+  // For multiselect: parse comma-separated value into a Set.
+  // Priority: user-edited value > stored value (maskedValue) > all options default.
+  const selectedValues = useMemo(() => {
+    if (!isMultiselect) return new Set<string>();
+    const raw = value || field.maskedValue || "";
+    if (raw) {
+      return new Set(raw.split(",").map((v) => v.trim()).filter(Boolean));
+    }
+    // Not configured and no value — default to all options selected
+    return new Set(field.options!.map((o) => o.value));
+  }, [isMultiselect, value, field.maskedValue, field.options]);
+
+  const handleCheckboxToggle = (optionValue: string, checked: boolean) => {
+    const next = new Set(selectedValues);
+    if (checked) {
+      next.add(optionValue);
+    } else {
+      next.delete(optionValue);
+    }
+    onValueChange(Array.from(next).join(","));
+  };
 
   return (
     <div className="space-y-1.5">
@@ -2596,42 +2658,63 @@ function FieldRow({
       {field.description && (
         <p className="text-xs text-muted-foreground">{field.description}</p>
       )}
-      <div className="flex gap-2">
-        {isMultiline && !showMasked ? (
-          <Textarea
-            id={field.key}
-            value={value}
-            onChange={(e) => onValueChange(e.target.value)}
-            placeholder={field.placeholder ?? undefined}
-            className="min-h-[80px] font-mono text-sm"
-            rows={4}
-          />
-        ) : (
-          <Input
-            id={field.key}
-            type={field.secret && !revealed ? "password" : "text"}
-            value={showMasked ? (field.maskedValue ?? "") : value}
-            onChange={(e) => onValueChange(e.target.value)}
-            placeholder={field.placeholder ?? undefined}
-            disabled={showMasked}
-            className="font-mono text-sm"
-          />
-        )}
-        {field.secret && (
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={onToggleReveal}
-            type="button"
-          >
-            {revealed ? (
-              <EyeOff className="h-4 w-4" />
-            ) : (
-              <Eye className="h-4 w-4" />
-            )}
-          </Button>
-        )}
-      </div>
+
+      {isMultiselect ? (
+        <div className="space-y-2 pt-1">
+          {field.options!.map((option) => (
+            <label
+              key={option.value}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <Checkbox
+                checked={selectedValues.has(option.value)}
+                onCheckedChange={(checked) =>
+                  handleCheckboxToggle(option.value, checked === true)
+                }
+              />
+              <span className="text-sm">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          {isMultiline && !showMasked ? (
+            <Textarea
+              id={field.key}
+              value={value}
+              onChange={(e) => onValueChange(e.target.value)}
+              placeholder={field.placeholder ?? undefined}
+              className="min-h-[80px] font-mono text-sm"
+              rows={4}
+            />
+          ) : (
+            <Input
+              id={field.key}
+              type={field.secret && !revealed ? "password" : "text"}
+              value={showMasked ? (field.maskedValue ?? "") : (value || (!field.secret && field.maskedValue ? field.maskedValue : ""))}
+              onChange={(e) => onValueChange(e.target.value)}
+              placeholder={field.placeholder ?? undefined}
+              disabled={showMasked}
+              className="font-mono text-sm"
+            />
+          )}
+          {field.secret && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onToggleReveal}
+              type="button"
+            >
+              {revealed ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+        </div>
+      )}
+
       {field.updatedAt && (
         <p className="text-xs text-muted-foreground">
           Last updated {timeAgo(field.updatedAt)}

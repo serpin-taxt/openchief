@@ -14,6 +14,7 @@ export interface PollEnv {
   JPD_API_EMAIL: string;
   JPD_INSTANCE_URL: string;
   JPD_PROJECTS?: string; // comma-separated project keys
+  JPD_EVENT_TYPES?: string; // comma-separated: "ideas,changes,comments" (all if unset)
   POLL_CURSOR: KVNamespace;
 }
 
@@ -40,7 +41,8 @@ export async function runPoll(env: PollEnv): Promise<PollResult> {
 
   console.log(`Polling JPD since ${since}`);
 
-  const result = await pollIdeas(client, env, since);
+  const enabledTypes = parseEventTypes(env.JPD_EVENT_TYPES);
+  const result = await pollIdeas(client, env, since, enabledTypes);
 
   // Update cursor
   await env.POLL_CURSOR.put(CURSOR_KEY, now);
@@ -56,13 +58,16 @@ export async function runPoll(env: PollEnv): Promise<PollResult> {
 async function pollIdeas(
   client: JpdClient,
   env: PollEnv,
-  since: string
+  since: string,
+  enabledTypes: Set<string>,
 ): Promise<PollResult> {
   const { normalizeIdea, normalizeIdeaChanges, normalizeIdeaComments } = await import("./normalize");
 
-  // Build JQL to find JPD ideas updated since last poll
-  // JPD issues have issuetype "Idea" — filter to that
-  const sinceDate = since.slice(0, 16).replace("T", " ");
+  // Build JQL to find JPD ideas updated since last poll.
+  // Subtract 12h overlap because Jira JQL interprets dates in the user's
+  // timezone, but our cursor is stored as UTC. Router deduplicates via ULID.
+  const sinceMs = new Date(since).getTime() - 12 * 60 * 60 * 1000;
+  const sinceDate = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
   const projects = parseProjects(env.JPD_PROJECTS);
 
   let jql = `issuetype = Idea AND updated >= "${sinceDate}"`;
@@ -82,22 +87,28 @@ async function pollIdeas(
 
     for (const idea of result.issues) {
       // Emit idea created/updated event
-      const ideaEvent = normalizeIdea(idea, since);
-      await env.EVENTS_QUEUE.send(ideaEvent);
-      ideaCount++;
+      if (enabledTypes.has("ideas")) {
+        const ideaEvent = normalizeIdea(idea, since);
+        await env.EVENTS_QUEUE.send(ideaEvent);
+        ideaCount++;
+      }
 
       // Emit status and field change events from changelog
-      const changes = normalizeIdeaChanges(idea, since);
-      for (const c of changes) {
-        await env.EVENTS_QUEUE.send(c);
-        statusChangeCount++;
+      if (enabledTypes.has("changes")) {
+        const changes = normalizeIdeaChanges(idea, since);
+        for (const c of changes) {
+          await env.EVENTS_QUEUE.send(c);
+          statusChangeCount++;
+        }
       }
 
       // Emit comment events
-      const comments = normalizeIdeaComments(idea, since);
-      for (const c of comments) {
-        await env.EVENTS_QUEUE.send(c);
-        commentCount++;
+      if (enabledTypes.has("comments")) {
+        const comments = normalizeIdeaComments(idea, since);
+        for (const c of comments) {
+          await env.EVENTS_QUEUE.send(c);
+          commentCount++;
+        }
       }
     }
 
@@ -127,10 +138,21 @@ export async function runBackfill(
   );
 
   console.log(`Backfilling JPD for ${days} days (since ${since})`);
-  const result = await pollIdeas(client, env, since);
+  const enabledTypes = parseEventTypes(env.JPD_EVENT_TYPES);
+  const result = await pollIdeas(client, env, since, enabledTypes);
 
   await env.POLL_CURSOR.put(CURSOR_KEY, new Date().toISOString());
   return result;
+}
+
+const ALL_EVENT_TYPES = new Set(["ideas", "changes", "comments"]);
+
+function parseEventTypes(typesStr?: string): Set<string> {
+  if (!typesStr) return ALL_EVENT_TYPES;
+  const parsed = new Set(
+    typesStr.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+  );
+  return parsed.size > 0 ? parsed : ALL_EVENT_TYPES;
 }
 
 function parseProjects(projectsStr?: string): string[] {

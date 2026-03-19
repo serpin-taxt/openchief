@@ -49,6 +49,7 @@ interface ConnectorField {
   secret: boolean;
   placeholder?: string;
   description?: string;
+  category?: "credential" | "subscription";
 }
 
 interface ConnectorConfig {
@@ -87,6 +88,7 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         label: "Repos (comma-separated)",
         secret: false,
         placeholder: "org/repo1,org/repo2",
+        category: "subscription",
       },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
@@ -97,7 +99,7 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
     fields: [
       { name: "SLACK_BOT_TOKEN", label: "Bot Token", secret: true, placeholder: "xoxb-..." },
       { name: "SLACK_SIGNING_SECRET", label: "Signing Secret", secret: true },
-      { name: "IGNORE_BOTS", label: "Ignore Bot Messages", secret: false, placeholder: "true (default) — set to false to include bot messages" },
+      { name: "IGNORE_BOTS", label: "Ignore Bot Messages", secret: false, placeholder: "true (default) — set to false to include bot messages", category: "subscription" },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
   },
@@ -195,12 +197,14 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         label: "Monitored Accounts (comma-separated)",
         secret: false,
         placeholder: "account1,account2",
+        category: "subscription",
       },
       {
         name: "X_SEARCH_QUERIES",
         label: "Search Queries (comma-separated)",
         secret: false,
         placeholder: '"my product",#myhashtag',
+        category: "subscription",
       },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
@@ -269,6 +273,22 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         label: "Projects (comma-separated)",
         secret: false,
         placeholder: "PROJ1,PROJ2",
+        category: "subscription",
+      },
+      {
+        name: "JIRA_EVENT_TYPES",
+        label: "Event Types",
+        secret: false,
+        category: "subscription",
+        type: "multiselect" as const,
+        options: [
+          { value: "issues", label: "Issues (created & updated)" },
+          { value: "transitions", label: "Status transitions" },
+          { value: "comments", label: "Comments" },
+          { value: "sprints", label: "Sprint changes" },
+        ],
+        description:
+          "Which Jira event types to ingest. All are selected by default.",
       },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
@@ -312,6 +332,21 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         label: "JPD Projects (comma-separated)",
         secret: false,
         placeholder: "JPD1,JPD2",
+        category: "subscription",
+      },
+      {
+        name: "JPD_EVENT_TYPES",
+        label: "Event Types",
+        secret: false,
+        category: "subscription",
+        type: "multiselect" as const,
+        options: [
+          { value: "ideas", label: "Ideas (created & updated)" },
+          { value: "changes", label: "Status & field changes" },
+          { value: "comments", label: "Comments" },
+        ],
+        description:
+          "Which JPD event types to ingest. All are selected by default.",
       },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
@@ -333,6 +368,23 @@ const CONNECTOR_CONFIGS: Record<string, ConnectorConfig> = {
         label: "Service Desk Projects (comma-separated)",
         secret: false,
         placeholder: "SD,ITSM",
+        category: "subscription",
+      },
+      {
+        name: "JSM_EVENT_TYPES",
+        label: "Event Types",
+        secret: false,
+        category: "subscription",
+        type: "multiselect" as const,
+        options: [
+          { value: "requests", label: "Requests (created & updated)" },
+          { value: "transitions", label: "Status transitions" },
+          { value: "comments", label: "Comments" },
+          { value: "sla", label: "SLA breaches" },
+          { value: "csat", label: "CSAT feedback" },
+        ],
+        description:
+          "Which JSM event types to ingest. All are selected by default.",
       },
       { name: "ADMIN_SECRET", label: "Admin Secret", secret: true },
     ],
@@ -1848,8 +1900,13 @@ async function handleGetConnectionSettings(
         placeholder: field.placeholder || null,
         description: field.description ?? null,
         configured: metadata !== null,
-        maskedValue: metadata ? maskValue(metadata) : null,
+        maskedValue: metadata
+          ? field.secret ? maskValue(metadata) : metadata
+          : null,
         updatedAt: null,
+        ...("type" in field && { type: field.type }),
+        ...("options" in field && { options: field.options }),
+        ...("category" in field && { category: field.category }),
       };
     })
   );
@@ -1883,6 +1940,12 @@ async function handleUpdateConnectionSettings(
     );
   }
 
+  // Resolve actual worker name using prefix (e.g. "openchief-internal-" instead of "openchief-")
+  const prefix = (env as Record<string, unknown>).WORKER_NAME_PREFIX as string | undefined;
+  const resolvedWorkerName = prefix
+    ? cfg.workerName.replace("openchief-connector-", `${prefix}connector-`)
+    : cfg.workerName;
+
   const validFieldNames = new Set(cfg.fields.map((f) => f.name));
   const errors: string[] = [];
   const updated: string[] = [];
@@ -1902,7 +1965,7 @@ async function handleUpdateConnectionSettings(
 
     if (fieldDef.secret) {
       // Set as a Cloudflare Worker secret via API
-      const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${cfg.workerName}/secrets`;
+      const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${resolvedWorkerName}/secrets`;
 
       const cfResponse = await fetch(apiUrl, {
         method: "PUT",
@@ -1923,27 +1986,30 @@ async function handleUpdateConnectionSettings(
         continue;
       }
     } else {
-      // Set as a plain text environment variable via Worker settings API
-      // For non-secret vars, we use the settings endpoint
-      const settingsUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${cfg.workerName}/settings`;
+      // Set as a plain text environment variable via Worker settings API.
+      // The Cloudflare settings PATCH endpoint requires multipart/form-data.
+      const settingsUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${resolvedWorkerName}/settings`;
+
+      const formData = new FormData();
+      formData.append(
+        "settings",
+        JSON.stringify({
+          bindings: [
+            {
+              type: "plain_text",
+              name: fieldName,
+              text: value.trim(),
+            },
+          ],
+        })
+      );
 
       const cfResponse = await fetch(settingsUrl, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${env.CF_API_TOKEN}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          settings: {
-            bindings: [
-              {
-                type: "plain_text",
-                name: fieldName,
-                text: value.trim(),
-              },
-            ],
-          },
-        }),
+        body: formData,
       });
 
       if (!cfResponse.ok) {
@@ -3185,6 +3251,16 @@ async function handleCreateTask(
     )
     .run();
 
+  // Trigger instant task execution on the assigned agent
+  if (body.assignedTo && env.AGENT_RUNTIME) {
+    env.AGENT_RUNTIME.fetch(
+      `https://runtime/trigger-task/${body.assignedTo}`,
+      { method: "POST", headers: runtimeHeaders(env) },
+    ).catch(err => {
+      console.error("Failed to trigger instant task execution:", err);
+    });
+  }
+
   return json({ id: taskId }, 201);
 }
 
@@ -3246,6 +3322,22 @@ async function handleUpdateTask(
   )
     .bind(...params)
     .run();
+
+  // Trigger instant task execution when a task is approved (status -> "queued")
+  if (body.status === "queued" && env.AGENT_RUNTIME) {
+    const taskData = await env.DB.prepare(
+      "SELECT assigned_to FROM tasks WHERE id = ?",
+    ).bind(taskId).first<{ assigned_to: string | null }>();
+
+    if (taskData?.assigned_to) {
+      env.AGENT_RUNTIME.fetch(
+        `https://runtime/trigger-task/${taskData.assigned_to}`,
+        { method: "POST", headers: runtimeHeaders(env) },
+      ).catch(err => {
+        console.error("Failed to trigger instant task execution:", err);
+      });
+    }
+  }
 
   return json({ ok: true });
 }
