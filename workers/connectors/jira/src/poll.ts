@@ -17,6 +17,7 @@ export interface PollEnv {
   JIRA_API_EMAIL: string;
   JIRA_INSTANCE_URL: string;
   JIRA_PROJECTS?: string; // comma-separated project keys, e.g. "PROJ1,PROJ2"
+  JIRA_EVENT_TYPES?: string; // comma-separated: "issues,transitions,comments,sprints" (all if unset)
   POLL_CURSOR: KVNamespace;
 }
 
@@ -48,17 +49,25 @@ export async function runPoll(env: PollEnv): Promise<PollResult> {
 
   console.log(`Polling Jira since ${since}`);
 
+  // Parse enabled event types (default: all)
+  const enabledTypes = parseEventTypes(env.JIRA_EVENT_TYPES);
+
   const result: PollResult = { issues: 0, transitions: 0, comments: 0, sprints: 0, total: 0 };
 
   // 1. Poll recently updated issues (includes changelog for transitions)
-  const issueEvents = await pollIssues(client, env, since);
-  result.issues = issueEvents.issueCount;
-  result.transitions = issueEvents.transitionCount;
-  result.comments = issueEvents.commentCount;
+  // Skip entirely only if issues, transitions, AND comments are all disabled
+  if (enabledTypes.has("issues") || enabledTypes.has("transitions") || enabledTypes.has("comments")) {
+    const issueEvents = await pollIssues(client, env, since, enabledTypes);
+    result.issues = issueEvents.issueCount;
+    result.transitions = issueEvents.transitionCount;
+    result.comments = issueEvents.commentCount;
+  }
 
   // 2. Poll sprint changes
-  const sprintCount = await pollSprints(client, env, since);
-  result.sprints = sprintCount;
+  if (enabledTypes.has("sprints")) {
+    const sprintCount = await pollSprints(client, env, since);
+    result.sprints = sprintCount;
+  }
 
   result.total = result.issues + result.transitions + result.comments + result.sprints;
 
@@ -79,12 +88,17 @@ export async function runPoll(env: PollEnv): Promise<PollResult> {
 async function pollIssues(
   client: JiraClient,
   env: PollEnv,
-  since: string
+  since: string,
+  enabledTypes: Set<string>
 ): Promise<{ issueCount: number; transitionCount: number; commentCount: number }> {
   const { normalizeIssue, normalizeTransitions, normalizeComments } = await import("./normalize");
 
-  // Build JQL: updated since last poll, optionally filtered by projects
-  const sinceDate = since.slice(0, 16).replace("T", " "); // "2026-02-18 12:00"
+  // Build JQL: updated since last poll, optionally filtered by projects.
+  // Subtract a generous overlap because Jira JQL interprets dates in the
+  // authenticated user's timezone, but our cursor is stored as UTC.
+  // The router's INSERT OR IGNORE deduplicates any overlapping events.
+  const sinceMs = new Date(since).getTime() - 12 * 60 * 60 * 1000; // 12h overlap
+  const sinceDate = new Date(sinceMs).toISOString().slice(0, 16).replace("T", " ");
   const projects = parseProjects(env.JIRA_PROJECTS);
   let jql = `updated >= "${sinceDate}"`;
   if (projects.length > 0) {
@@ -103,22 +117,28 @@ async function pollIssues(
 
     for (const issue of result.issues) {
       // Emit issue created/updated event
-      const issueEvent = normalizeIssue(issue, since);
-      await env.EVENTS_QUEUE.send(issueEvent);
-      issueCount++;
+      if (enabledTypes.has("issues")) {
+        const issueEvent = normalizeIssue(issue, since);
+        await env.EVENTS_QUEUE.send(issueEvent);
+        issueCount++;
+      }
 
       // Emit transition events from changelog
-      const transitions = normalizeTransitions(issue, since);
-      for (const t of transitions) {
-        await env.EVENTS_QUEUE.send(t);
-        transitionCount++;
+      if (enabledTypes.has("transitions")) {
+        const transitions = normalizeTransitions(issue, since);
+        for (const t of transitions) {
+          await env.EVENTS_QUEUE.send(t);
+          transitionCount++;
+        }
       }
 
       // Emit comment events
-      const comments = normalizeComments(issue, since);
-      for (const c of comments) {
-        await env.EVENTS_QUEUE.send(c);
-        commentCount++;
+      if (enabledTypes.has("comments")) {
+        const comments = normalizeComments(issue, since);
+        for (const c of comments) {
+          await env.EVENTS_QUEUE.send(c);
+          commentCount++;
+        }
       }
     }
 
@@ -220,7 +240,8 @@ export async function runBackfill(
   console.log(`Backfilling Jira for ${days} days (since ${since})`);
 
   const result: PollResult = { issues: 0, transitions: 0, comments: 0, sprints: 0, total: 0 };
-  const issueEvents = await pollIssues(client, env, since);
+  const enabledTypes = parseEventTypes(env.JIRA_EVENT_TYPES);
+  const issueEvents = await pollIssues(client, env, since, enabledTypes);
   result.issues = issueEvents.issueCount;
   result.transitions = issueEvents.transitionCount;
   result.comments = issueEvents.commentCount;
@@ -233,6 +254,16 @@ export async function runBackfill(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const ALL_EVENT_TYPES = new Set(["issues", "transitions", "comments", "sprints"]);
+
+function parseEventTypes(typesStr?: string): Set<string> {
+  if (!typesStr) return ALL_EVENT_TYPES;
+  const parsed = new Set(
+    typesStr.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+  );
+  return parsed.size > 0 ? parsed : ALL_EVENT_TYPES;
+}
 
 function parseProjects(projectsStr?: string): string[] {
   if (!projectsStr) return [];

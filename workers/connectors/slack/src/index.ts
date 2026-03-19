@@ -376,6 +376,25 @@ async function handleInteractivePayload(
       });
 
       console.log(`Task ${taskId} approved by ${userName}`);
+
+      // Trigger instant task execution on the assigned agent
+      if (env.AGENT_RUNTIME && env.RUNTIME_ADMIN_SECRET) {
+        const taskRow = await env.DB.prepare(
+          "SELECT assigned_to FROM tasks WHERE id = ?"
+        ).bind(taskId).first<{ assigned_to: string | null }>();
+
+        if (taskRow?.assigned_to) {
+          env.AGENT_RUNTIME.fetch(
+            `https://runtime/trigger-task/${taskRow.assigned_to}`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${env.RUNTIME_ADMIN_SECRET}` },
+            }
+          ).catch(err => {
+            console.error("Failed to trigger instant task execution:", err);
+          });
+        }
+      }
     } else if (actionId === "task_reject") {
       await env.DB.prepare(
         `UPDATE tasks SET status = 'cancelled', updated_at = ?
