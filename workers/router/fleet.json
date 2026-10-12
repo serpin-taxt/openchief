@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fleet.beta.ethos.network/schema/fleet.json",
+  "name": "openchief-router",
+  "title": "Openchief Router",
+  "description": "[WHAT IT DOES]",
+  "status": "active",
+  "owner": "trevor@ethos.network",
+  "repo": "serpin-taxt/openchief",
+  "urls": [
+    "https://openchief-router.trevor-428.workers.dev"
+  ],
+  "cloudflare": {
+    "account": "personal",
+    "workers": [
+      "openchief-router"
+    ]
+  },
+  "access": "public",
+  "services": [],
+  "secrets": [],
+  "spend": {
+    "fixed": []
+  },
+  "notes": "",
+  "tags": []
+}
