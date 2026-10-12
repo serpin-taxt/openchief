@@ -1,0 +1,42 @@
+{
+  "$schema": "https://fleet.beta.ethos.network/schema/fleet.json",
+  "name": "openchief-dashboard",
+  "title": "Openchief Dashboard",
+  "description": "[WHAT IT DOES]",
+  "status": "active",
+  "owner": "trevor@ethos.network",
+  "repo": "serpin-taxt/openchief",
+  "urls": [
+    "https://openchief-dashboard.trevor-428.workers.dev"
+  ],
+  "cloudflare": {
+    "account": "personal",
+    "workers": [
+      "openchief-dashboard"
+    ]
+  },
+  "access": "public",
+  "services": [],
+  "secrets": [
+    {
+      "name": "ADMIN_PASSWORD",
+      "required": true,
+      "from": "[WHERE]"
+    },
+    {
+      "name": "AUTH_PROVIDER",
+      "required": true,
+      "from": "[WHERE]"
+    },
+    {
+      "name": "CF_API_TOKEN",
+      "required": true,
+      "from": "[WHERE]"
+    }
+  ],
+  "spend": {
+    "fixed": []
+  },
+  "notes": "",
+  "tags": []
+}
