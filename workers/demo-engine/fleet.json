@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fleet.beta.ethos.network/schema/fleet.json",
+  "name": "openchief-demo-engine",
+  "title": "Openchief Demo Engine",
+  "description": "[WHAT IT DOES]",
+  "status": "active",
+  "owner": "trevor@ethos.network",
+  "repo": "serpin-taxt/openchief",
+  "urls": [
+    "https://openchief-demo-engine.trevor-428.workers.dev"
+  ],
+  "cloudflare": {
+    "account": "personal",
+    "workers": [
+      "openchief-demo-engine"
+    ]
+  },
+  "access": "public",
+  "services": [],
+  "secrets": [],
+  "spend": {
+    "fixed": []
+  },
+  "notes": "",
+  "tags": []
+}
