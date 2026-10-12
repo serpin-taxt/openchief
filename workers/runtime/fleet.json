@@ -1,0 +1,40 @@
+{
+  "$schema": "https://fleet.beta.ethos.network/schema/fleet.json",
+  "name": "openchief-runtime",
+  "title": "Openchief Runtime",
+  "description": "[WHAT IT DOES]",
+  "status": "active",
+  "owner": "trevor@ethos.network",
+  "repo": "serpin-taxt/openchief",
+  "urls": [
+    "https://openchief-runtime.trevor-428.workers.dev"
+  ],
+  "cloudflare": {
+    "account": "personal",
+    "workers": [
+      "openchief-runtime"
+    ]
+  },
+  "access": "public",
+  "services": [
+    {
+      "name": "anthropic",
+      "purpose": "[PURPOSE]",
+      "secret": "ANTHROPIC_API_KEY",
+      "billing": "usage"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "required": true,
+      "from": "[WHERE]"
+    }
+  ],
+  "spend": {
+    "anthropic_workspace": "[WORKSPACE NAME]",
+    "fixed": []
+  },
+  "notes": "",
+  "tags": []
+}
